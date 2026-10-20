@@ -323,7 +323,7 @@ export async function productSales(
         categoryName: sql<string | null>`max(${categories.name})`,
         qty: sql<number>`coalesce(sum(${invoiceLines.quantity}), 0)`,
         net: sql<number>`coalesce(sum(${invoiceLines.net}), 0)`,
-        cost: sql<number>`coalesce(sum(round(${invoiceLines.quantity} * ${invoiceLines.unitCost})), 0)`,
+        cost: sql<number>`coalesce(sum(${invoiceLines.costAmount}), 0)`,
       })
       .from(invoiceLines)
       .innerJoin(invoices, eq(invoices.id, invoiceLines.invoiceId))
@@ -340,7 +340,7 @@ export async function productSales(
         categoryName: sql<string | null>`max(${categories.name})`,
         qty: sql<number>`coalesce(sum(${saleReturnLines.quantity}), 0)`,
         net: sql<number>`coalesce(sum(${saleReturnLines.net}), 0)`,
-        cost: sql<number>`coalesce(sum(round(${saleReturnLines.quantity} * ${saleReturnLines.unitCost})), 0)`,
+        cost: sql<number>`coalesce(sum(${saleReturnLines.costAmount}), 0)`,
       })
       .from(saleReturnLines)
       .innerJoin(saleReturns, eq(saleReturns.id, saleReturnLines.returnId))
@@ -405,7 +405,7 @@ export async function categorySales(ctx: Ctx, f: SalesFilter): Promise<CategoryS
         name: categories.name,
         qty: sql<number>`coalesce(sum(${invoiceLines.quantity}), 0)`,
         net: sql<number>`coalesce(sum(${invoiceLines.net}), 0)`,
-        cost: sql<number>`coalesce(sum(round(${invoiceLines.quantity} * ${invoiceLines.unitCost})), 0)`,
+        cost: sql<number>`coalesce(sum(${invoiceLines.costAmount}), 0)`,
       })
       .from(invoiceLines)
       .innerJoin(invoices, eq(invoices.id, invoiceLines.invoiceId))
@@ -418,7 +418,7 @@ export async function categorySales(ctx: Ctx, f: SalesFilter): Promise<CategoryS
         name: categories.name,
         qty: sql<number>`coalesce(sum(${saleReturnLines.quantity}), 0)`,
         net: sql<number>`coalesce(sum(${saleReturnLines.net}), 0)`,
-        cost: sql<number>`coalesce(sum(round(${saleReturnLines.quantity} * ${saleReturnLines.unitCost})), 0)`,
+        cost: sql<number>`coalesce(sum(${saleReturnLines.costAmount}), 0)`,
       })
       .from(saleReturnLines)
       .innerJoin(saleReturns, eq(saleReturns.id, saleReturnLines.returnId))

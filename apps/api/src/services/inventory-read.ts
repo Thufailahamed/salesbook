@@ -52,6 +52,7 @@ export async function listStock(ctx: Ctx, q: StockQuery) {
     .select({
       variantId: stockLevels.variantId,
       qty: sql<number>`sum(${stockLevels.quantity})`.as("qty"),
+      value: sql<number>`sum(${stockLevels.value})`.as("value"),
     })
     .from(stockLevels)
     .where(and(...levelConds))
@@ -86,7 +87,7 @@ export async function listStock(ctx: Ctx, q: StockQuery) {
       case "quantity":
         return [sql.raw(`coalesce("s"."qty", 0) ${dir}`)];
       case "value":
-        return [sql`(coalesce(${s.qty}, 0) * ${variants.costPrice}) ${sql.raw(dir)}`];
+        return [sql`coalesce(${s.value}, 0) ${sql.raw(dir)}`];
       case "sku":
         return [sql`${variants.sku} ${sql.raw(dir)}`];
       default:
@@ -97,6 +98,7 @@ export async function listStock(ctx: Ctx, q: StockQuery) {
   const base = () =>
     ctx.db
       .select({
+        stockValue: sql<number>`coalesce(${s.value}, 0)`,
         variantId: variants.id,
         productId: products.id,
         productName: products.name,
@@ -124,7 +126,7 @@ export async function listStock(ctx: Ctx, q: StockQuery) {
       .select({
         n: sql<number>`count(*)`,
         quantity: sql<number>`coalesce(sum(coalesce(${s.qty}, 0)), 0)`,
-        value: sql<number>`coalesce(sum(round(coalesce(${s.qty}, 0) * ${variants.costPrice})), 0)`,
+        value: sql<number>`coalesce(sum(coalesce(${s.value}, 0)), 0)`,
         retailValue: sql<number>`coalesce(sum(round(coalesce(${s.qty}, 0) * ${variants.price})), 0)`,
       })
       .from(variants)
@@ -150,7 +152,7 @@ export async function listStock(ctx: Ctx, q: StockQuery) {
         reorderLevel: r.reorderLevel,
         costPrice: r.costPrice,
         price: r.price,
-        value: Math.round(quantity * r.costPrice),
+        value: Math.round(r.stockValue),
         retailValue: Math.round(quantity * r.price),
       };
     },

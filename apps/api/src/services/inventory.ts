@@ -12,14 +12,7 @@ import { badRequest } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { getLocation } from "./sales";
 import { reserveNumbers } from "./sequences";
-import {
-  loadVariants,
-  queueCostUpdate,
-  queueStockChanges,
-  stockAt,
-  stockTotals,
-  weightedAverage,
-} from "./stock";
+import { loadStockCoster, loadVariants, queueCostUpdate, queueStockChanges, stockAt } from "./stock";
 import { Tx } from "./tx";
 
 export interface OpeningStockItem {
@@ -82,7 +75,7 @@ export async function queueOpeningStock(
       productId: i.productId,
       locationId: args.locationId,
       quantity: i.quantity,
-      unitCost: i.unitCost,
+      value: roundHalfAway(i.quantity * i.unitCost),
       type: "opening" as const,
       referenceType: "adjustment",
       referenceId: id,
@@ -118,10 +111,6 @@ export async function createAdjustment(ctx: Ctx, input: StockAdjustmentInput) {
     input.lines.map((l) => l.variantId),
     location.id,
   );
-  const totals = await stockTotals(
-    ctx,
-    input.lines.map((l) => l.variantId),
-  );
 
   // Merge duplicate variants (counted quantity wins; changes add up).
   const merged = new Map<string, { change: number; unitCost?: number }>();
@@ -154,20 +143,22 @@ export async function createAdjustment(ctx: Ctx, input: StockAdjustmentInput) {
   const sys = await ctx.accounts();
   const tx = new Tx(ctx);
 
+  const coster = await loadStockCoster(
+    ctx,
+    rows.map(([variantId]) => variantId),
+    new Map([...info].map(([id, v]) => [id, v.costPrice])),
+  );
   const lines = rows.map(([variantId, m]) => {
     const v = info.get(variantId)!;
-    const unitCost = m.change > 0 ? (m.unitCost ?? v.costPrice) : v.costPrice;
-    if (m.change > 0 && m.unitCost !== undefined && m.unitCost !== v.costPrice) {
-      queueCostUpdate(ctx, tx, variantId, weightedAverage(totals.get(variantId) ?? 0, v.costPrice, m.change, m.unitCost));
+    const before = current.get(variantId) ?? 0;
+    if (m.change > 0) {
+      const unitCost = m.unitCost ?? v.costPrice;
+      const value = roundHalfAway(m.change * unitCost);
+      coster.in(variantId, location.id, m.change, value);
+      return { variantId, productId: v.productId, before, change: m.change, unitCost, value };
     }
-    return {
-      variantId,
-      productId: v.productId,
-      before: current.get(variantId) ?? 0,
-      change: m.change,
-      unitCost,
-      value: roundHalfAway(m.change * unitCost),
-    };
+    const value = -coster.out(variantId, location.id, -m.change);
+    return { variantId, productId: v.productId, before, change: m.change, unitCost: roundHalfAway(value / m.change), value };
   });
   const totalValue = lines.reduce((s, l) => s + l.value, 0);
 
@@ -210,7 +201,7 @@ export async function createAdjustment(ctx: Ctx, input: StockAdjustmentInput) {
       productId: l.productId,
       locationId: location.id,
       quantity: l.change,
-      unitCost: l.unitCost,
+      value: l.value,
       type: input.reason === "opening" ? ("opening" as const) : ("adjustment" as const),
       referenceType: "adjustment",
       referenceId: id,
@@ -219,6 +210,7 @@ export async function createAdjustment(ctx: Ctx, input: StockAdjustmentInput) {
       date,
     })),
   );
+  for (const u of coster.costUpdates()) queueCostUpdate(ctx, tx, u.variantId, u.costPrice);
   const counter = input.reason === "opening" ? sys.opening_equity : sys.inventory_adjustments;
   tx.journal({
     date,
@@ -288,23 +280,29 @@ export async function createTransfer(ctx: Ctx, input: StockTransferInput) {
       lines.map(([variantId, quantity]) => ({ id: newId(), transferId: id, businessId: ctx.businessId, variantId, quantity })),
     ),
   );
+  const coster = await loadStockCoster(
+    ctx,
+    lines.map(([variantId]) => variantId),
+    new Map([...info].map(([id, v]) => [id, v.costPrice])),
+  );
   queueStockChanges(
     ctx,
     tx,
     lines.flatMap(([variantId, quantity]) => {
       const v = info.get(variantId)!;
+      const amount = coster.out(variantId, from.id, quantity);
+      coster.in(variantId, to.id, quantity, amount);
       const base = {
         variantId,
         productId: v.productId,
-        unitCost: v.costPrice,
         referenceType: "transfer",
         referenceId: id,
         referenceNumber: number,
         date,
       };
       return [
-        { ...base, locationId: from.id, quantity: -quantity, type: "transfer_out" as const, note: `To ${to.name}` },
-        { ...base, locationId: to.id, quantity, type: "transfer_in" as const, note: `From ${from.name}` },
+        { ...base, locationId: from.id, quantity: -quantity, value: -amount, type: "transfer_out" as const, note: `To ${to.name}` },
+        { ...base, locationId: to.id, quantity, value: amount, type: "transfer_in" as const, note: `From ${from.name}` },
       ];
     }),
   );

@@ -334,8 +334,8 @@ async function main() {
   const cards = await get("/gift-cards?pageSize=500");
   eq("Gift card liability = Σ card balances", bal("2300"), sum(cards.data, "balance"));
   const stock = await get("/inventory/stock?pageSize=500");
-  const diff = Math.abs(bal("1200") - stock.totals.value);
-  check(`Inventory ledger ≈ stock valuation (diff ${diff})`, diff <= 500, { ledger: bal("1200"), stock: stock.totals.value });
+  const diff = bal("1200") - stock.totals.value;
+  check(`Inventory ledger = stock valuation (diff ${diff})`, diff === 0, { ledger: bal("1200"), stock: stock.totals.value });
   const tees = await get(`/products/${tee.id}`);
   const sRed = tees.variants.find((x) => x.options.Size === "S" && x.options.Color === "Red");
   eq("S/Red stock (10 −2 +1 +20)", sRed.stock, 29);

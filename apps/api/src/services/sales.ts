@@ -46,7 +46,7 @@ import {
 } from "./payments";
 import { getInvoiceDto, getReturnDto } from "./sales-read";
 import { reserveNumbers } from "./sequences";
-import { assertStockAvailable, loadVariants, queueStockChanges, type StockChange } from "./stock";
+import { assertStockAvailable, loadStockCoster, loadVariants, queueStockChanges, type StockChange } from "./stock";
 import { Tx, queueReversals } from "./tx";
 
 export type InvoiceRow = typeof invoices.$inferSelect;
@@ -77,6 +77,12 @@ export async function taxRateMap(ctx: Ctx) {
 }
 
 /** Quantity of a line still returnable. */
+/** Cost of goods coming back: the rest of the line's cost when the last units return, otherwise pro rata. */
+function returnCost(ol: Pick<InvoiceLineRow, "quantity" | "costAmount" | "costReturned">, qty: number, left: number) {
+  if (Math.abs(qty - left) < 1e-9) return ol.costAmount - ol.costReturned;
+  return roundHalfAway((ol.costAmount * qty) / ol.quantity);
+}
+
 export function returnableQty(l: Pick<InvoiceLineRow, "quantity" | "quantityReturned">) {
   return roundQty(l.quantity - l.quantityReturned);
 }
@@ -92,7 +98,6 @@ interface ResolvedSaleLine {
   discountType: "amount" | "percent" | null;
   discountValue: number | null;
   taxRate: number;
-  unitCost: number;
   track: boolean;
   note: string | null;
 }
@@ -140,6 +145,7 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
   ];
   const info = await loadVariants(ctx, variantIds);
   const rates = await taxRateMap(ctx);
+  const coster = await loadStockCoster(ctx, variantIds, new Map([...info].map(([id, v]) => [id, v.costPrice])));
 
   const saleLines: ResolvedSaleLine[] = input.lines.map((l) => {
     if (l.variantId) {
@@ -163,7 +169,6 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
         discountType: l.discountType ?? null,
         discountValue: l.discountValue ?? null,
         taxRate: v.taxRateId ? (rates.get(v.taxRateId) ?? 0) : 0,
-        unitCost: v.trackInventory ? v.costPrice : 0,
         track: v.trackInventory,
         note: l.note ?? null,
       };
@@ -180,7 +185,6 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
       discountType: l.discountType ?? null,
       discountValue: l.discountValue ?? null,
       taxRate: l.taxRate ?? 0,
-      unitCost: 0,
       track: false,
       note: l.note ?? null,
     };
@@ -204,6 +208,7 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
     total: number;
     restock: boolean;
     track: boolean;
+    costAmount: number;
   }
   const returnLines: ResolvedReturnLine[] = [];
   if (orig && input.returnFrom) {
@@ -226,18 +231,17 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
         amounts = { net, tax, total: net + tax };
       }
       const track = !!ol.variantId && !!info.get(ol.variantId)?.trackInventory;
-      returnLines.push({ line: ol, quantity: r.quantity, ...amounts, restock: r.restock, track });
+      const costAmount = track ? returnCost(ol, r.quantity, left) : 0;
+      // Returns are costed before the sale, so the goods they bring back are available to it.
+      if (track && r.restock) coster.in(ol.variantId!, location.id, r.quantity, costAmount);
+      returnLines.push({ line: ol, quantity: r.quantity, ...amounts, costAmount, restock: r.restock, track });
     }
   }
   const retNet = returnLines.reduce((s, r) => s + r.net, 0);
   const retTax = returnLines.reduce((s, r) => s + r.tax, 0);
   const retTotal = retNet + retTax;
-  const restockCost = returnLines
-    .filter((r) => r.track && r.restock)
-    .reduce((s, r) => s + roundHalfAway(r.quantity * r.line.unitCost), 0);
-  const damagedCost = returnLines
-    .filter((r) => r.track && !r.restock)
-    .reduce((s, r) => s + roundHalfAway(r.quantity * r.line.unitCost), 0);
+  const restockCost = returnLines.filter((r) => r.track && r.restock).reduce((s, r) => s + r.costAmount, 0);
+  const damagedCost = returnLines.filter((r) => r.track && !r.restock).reduce((s, r) => s + r.costAmount, 0);
 
   // ---------------------------------------------------------------- settlement
   const appliedToOriginal = orig ? Math.min(retTotal, orig.amountDue) : 0;
@@ -316,7 +320,8 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
   // ---------------------------------------------------------------- invoice
   if (invoiceId && invoiceNumber) {
     const amountPaid = appliedToExchange + tt.total;
-    const costTotal = saleLines.reduce((s, l) => s + (l.track ? roundHalfAway(l.quantity * l.unitCost) : 0), 0);
+    const lineCosts = saleLines.map((l) => (l.track && l.variantId ? coster.out(l.variantId, location.id, l.quantity) : 0));
+    const costTotal = lineCosts.reduce((s, c) => s + c, 0);
     tx.add(
       ctx.db.insert(invoices).values({
         id: invoiceId,
@@ -381,21 +386,23 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
           net: calc.lines[i]!.net,
           tax: calc.lines[i]!.tax,
           total: calc.lines[i]!.total,
-          unitCost: l.unitCost,
+          unitCost: l.quantity ? roundHalfAway(lineCosts[i]! / l.quantity) : 0,
+          costAmount: lineCosts[i]!,
+          costReturned: 0,
           note: l.note,
           sortOrder: i,
           date,
         })),
       ),
     );
-    for (const l of saleLines) {
+    for (const [i, l] of saleLines.entries()) {
       if (!l.track || !l.variantId) continue;
       stockChanges.push({
         variantId: l.variantId,
         productId: l.productId!,
         locationId: location.id,
         quantity: -l.quantity,
-        unitCost: l.unitCost,
+        value: -lineCosts[i]!,
         type: "sale",
         referenceType: "invoice",
         referenceId: invoiceId,
@@ -521,6 +528,7 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
           tax: r.tax,
           total: r.total,
           unitCost: r.line.unitCost,
+          costAmount: r.costAmount,
           restock: r.restock,
           date,
         })),
@@ -530,7 +538,10 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
       tx.add(
         ctx.db
           .update(invoiceLines)
-          .set({ quantityReturned: sql`round(${invoiceLines.quantityReturned} + ${r.quantity}, 3)` })
+          .set({
+            quantityReturned: sql`round(${invoiceLines.quantityReturned} + ${r.quantity}, 3)`,
+            costReturned: sql`${invoiceLines.costReturned} + ${r.costAmount}`,
+          })
           .where(eq(invoiceLines.id, r.line.id)) as unknown as Stmt,
       );
       if (r.track && r.restock && r.line.variantId) {
@@ -539,7 +550,7 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
           productId: r.line.productId!,
           locationId: location.id,
           quantity: r.quantity,
-          unitCost: r.line.unitCost,
+          value: r.costAmount,
           type: "sale_return",
           referenceType: "sale_return",
           referenceId: returnId,
@@ -855,7 +866,7 @@ export async function voidInvoice(ctx: Ctx, invoiceId: string, reason: string) {
         productId: l.productId!,
         locationId: inv.locationId,
         quantity: l.quantity,
-        unitCost: l.unitCost,
+        value: l.costAmount,
         type: "void" as const,
         referenceType: "invoice",
         referenceId: inv.id,

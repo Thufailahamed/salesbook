@@ -259,6 +259,8 @@ export const stockLevels = sqliteTable(
     variantId: text("variant_id").notNull(),
     locationId: text("location_id").notNull(),
     quantity: real("quantity").notNull().default(0),
+    /** Inventory value at cost held at this location (minor units). Equals the Inventory ledger when summed. */
+    value: money("value"),
   },
   (t) => [
     primaryKey({ columns: [t.variantId, t.locationId] }),
@@ -489,6 +491,10 @@ export const invoiceLines = sqliteTable(
     tax: money("tax"),
     total: money("total"),
     unitCost: money("unit_cost"),
+    /** Cost of goods sold for this line (exact ledger amount, minor units). */
+    costAmount: money("cost_amount"),
+    /** Cost already returned to stock or written off, so later returns take the exact remainder. */
+    costReturned: money("cost_returned"),
     quantityReturned: real("quantity_returned").notNull().default(0),
     note: text("note"),
     sortOrder: integer("sort_order").notNull().default(0),
@@ -551,6 +557,8 @@ export const saleReturnLines = sqliteTable(
     tax: money("tax"),
     total: money("total"),
     unitCost: money("unit_cost"),
+    /** Cost of the returned goods (exact ledger amount, minor units). */
+    costAmount: money("cost_amount"),
     restock: bool("restock", true),
     date: text("date").notNull(),
   },

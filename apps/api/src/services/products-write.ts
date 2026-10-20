@@ -19,7 +19,7 @@ import { badRequest, conflict, notFound } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { queueOpeningStock, type OpeningStockItem } from "./inventory";
 import { reserveNumbers } from "./sequences";
-import { stockTotals } from "./stock";
+import { loadStockCoster, stockTotals } from "./stock";
 import { Tx } from "./tx";
 
 type ProductRow = typeof products.$inferSelect;
@@ -408,6 +408,11 @@ export async function updateProduct(ctx: Ctx, productId: string, input: ProductI
   const sys = await ctx.accounts();
   let revaluation = 0;
   const revalued: string[] = [];
+  const levels = await loadStockCoster(
+    ctx,
+    existingVariants.map((v) => v.id),
+    new Map(existingVariants.map((v) => [v.id, v.costPrice])),
+  );
   for (const v of n.normalized) {
     if (!v.existing) continue;
     tx.add(
@@ -430,8 +435,17 @@ export async function updateProduct(ctx: Ctx, productId: string, input: ProductI
     );
     // Keep the ledger in sync with stock value when the average cost is edited manually.
     if (n.trackInventory && v.costPrice !== v.existing.costPrice) {
-      const qty = totals.get(v.id) ?? 0;
-      const delta = roundHalfAway(qty * (v.costPrice - v.existing.costPrice));
+      let delta = 0;
+      for (const lv of levels.entries(v.id)) {
+        const value = roundHalfAway(lv.quantity * v.costPrice);
+        delta += value - lv.value;
+        tx.add(
+          ctx.db
+            .update(stockLevels)
+            .set({ value })
+            .where(and(eq(stockLevels.variantId, v.id), eq(stockLevels.locationId, lv.locationId))) as unknown as Stmt,
+        );
+      }
       if (delta !== 0) {
         revaluation += delta;
         revalued.push(v.name || input.name.trim());

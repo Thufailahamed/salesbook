@@ -154,7 +154,7 @@ All endpoints are under `/api`. Request bodies are validated with the zod schema
 | Customer payment on account | Method account | AR (allocated) / Store Credit (advance) |
 | Purchase received | Inventory (net + freight), Input Tax | Accounts Payable |
 | Supplier payment | AP (allocated) / Supplier Advances (advance) | Method account |
-| Purchase return | Accounts Payable | Inventory, Input Tax (freight share → Shrinkage) |
+| Purchase return | Accounts Payable | Inventory (at the location's average cost), Input Tax; difference from the bill's net → Shrinkage |
 | Expense | Expense account, Input Tax | Method account |
 | Stock adjustment + / − | Inventory / Shrinkage | Shrinkage / Inventory (opening stock → Opening Balance Equity) |
 | Gift card sold / promotional | Method account / Marketing | Gift Card Liability |
@@ -162,3 +162,14 @@ All endpoints are under `/api`. Request bodies are validated with the zod schema
 | Cash drawer pay-in / pay-out | Cash / chosen account | chosen account / Cash |
 | Opening balances | AR / Opening Equity | Opening Equity / AP |
 | Void | exact reversal of the original entries | |
+
+### Stock valuation
+
+Each stock level (variant × location) holds its value at cost in `stock_levels.value`. Every stock movement posts the same
+ledger amount to the Inventory account and to that value, so the Inventory account always equals the stock valuation report.
+
+* Goods leave a location at its average cost (value ÷ quantity). Taking the last units takes the whole remaining value.
+* Sale lines and return lines store their exact cost amount (`cost_amount`), so voids and returns reverse what was posted.
+* Receipts enter at the landed value the purchase journal books (net + allocated freight).
+* A manual cost edit revalues every location at the new cost and posts the difference to Inventory.
+* `variants.cost_price` is the average cost for display and defaults; the ledger is driven by the stored values.
