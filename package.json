@@ -1,0 +1,21 @@
+{
+  "name": "shopbooks",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w @shopbooks/api",
+    "dev:web": "npm run dev -w @shopbooks/web",
+    "db:migrate:local": "npm run db:migrate:local -w @shopbooks/api",
+    "db:migrate:remote": "npm run db:migrate:remote -w @shopbooks/api",
+    "build": "npm run build -w @shopbooks/web",
+    "deploy": "npm run build -w @shopbooks/web && npm run deploy -w @shopbooks/api",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "workerd": true
+  }
+}

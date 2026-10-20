@@ -1,0 +1,27 @@
+{
+  "name": "@shopbooks/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/ensure-assets.mjs && wrangler dev --port 8787",
+    "deploy": "node scripts/ensure-assets.mjs && wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply shopbooks-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply shopbooks-db --remote",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.9.1",
+    "@shopbooks/shared": "*",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.13",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261019.1",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "~5.9.3",
+    "wrangler": "^4.151.2"
+  }
+}
