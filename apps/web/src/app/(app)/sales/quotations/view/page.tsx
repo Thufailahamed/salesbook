@@ -53,7 +53,7 @@ function QuotationView() {
     onSuccess: () => router.push("/sales/quotations"),
   });
 
-  if (!id) return <ErrorState message="No quotation selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No quotation selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !q) return <ErrorState message={error?.message ?? "Quotation not found"} onRetry={() => refetch()} />;
 

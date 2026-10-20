@@ -77,7 +77,7 @@ function SupplierView() {
     },
   );
 
-  if (!id) return <ErrorState message="No supplier selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No supplier selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !s) return <ErrorState message={error?.message ?? "Supplier not found"} onRetry={() => refetch()} />;
 

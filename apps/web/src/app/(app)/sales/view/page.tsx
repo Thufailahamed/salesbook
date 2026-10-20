@@ -61,7 +61,7 @@ function InvoiceView() {
     success: (i) => `${i.number} voided`,
   });
 
-  if (!id) return <ErrorState message="No invoice selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No invoice selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !inv) return <ErrorState message={error?.message ?? "Invoice not found"} onRetry={() => refetch()} />;
 

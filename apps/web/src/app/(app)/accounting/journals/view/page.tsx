@@ -39,7 +39,7 @@ function JournalView() {
     success: (r) => `Reversed by ${r.number}`,
     onSuccess: (r) => router.push(`/accounting/journals/view?id=${r.id}`),
   });
-  if (!id) return <ErrorState message="No entry selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No entry selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !j) return <ErrorState message={error?.message ?? "Entry not found"} onRetry={() => refetch()} />;
 

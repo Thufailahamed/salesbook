@@ -34,7 +34,7 @@ function ShiftView() {
   const { data: s, isLoading, error, refetch } = useApiQuery<ShiftReport>(id ? `/shifts/${id}` : null);
   const [closeDlg, setCloseDlg] = React.useState(false);
   const [moveDlg, setMoveDlg] = React.useState(false);
-  if (!id) return <ErrorState message="No shift selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No shift selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !s) return <ErrorState message={error?.message ?? "Shift not found"} onRetry={() => refetch()} />;
 

@@ -27,7 +27,7 @@ function PurchaseReturnView() {
   const id = useSearchParams().get("id");
   const money = useMoney();
   const { data: r, isLoading, error, refetch } = useApiQuery<PurchaseReturn>(id ? `/purchase-returns/${id}` : null);
-  if (!id) return <ErrorState message="No return selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No return selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !r) return <ErrorState message={error?.message ?? "Return not found"} onRetry={() => refetch()} />;
 

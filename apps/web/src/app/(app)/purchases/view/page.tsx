@@ -58,7 +58,7 @@ function PurchaseView() {
 
   const cancel = useApiMutation(() => api.post<Purchase>(`/purchases/${id}/cancel`), { invalidate: INVALIDATE, success: "Order cancelled" });
 
-  if (!id) return <ErrorState message="No purchase selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No purchase selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !p) return <ErrorState message={error?.message ?? "Purchase not found"} onRetry={() => refetch()} />;
 

@@ -47,10 +47,18 @@ export function DetailSkeleton() {
 }
 
 /** Error box with retry. */
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorState({
+  message,
+  onRetry,
+  title = "Something went wrong",
+}: {
+  message: string;
+  onRetry?: () => void;
+  title?: string;
+}) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-destructive/30 bg-destructive-soft/40 px-6 py-12 text-center">
-      <p className="font-medium text-destructive-soft-foreground">Something went wrong</p>
+      <p className="font-medium text-destructive-soft-foreground">{title}</p>
       <p className="max-w-md text-[13px] text-muted-foreground">{message}</p>
       {onRetry && (
         <button onClick={onRetry} className="text-[13px] font-medium text-primary hover:underline">

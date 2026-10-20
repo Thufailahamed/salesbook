@@ -138,7 +138,7 @@ useBusinessToday()             // "YYYY-MM-DD" in the business timezone (from co
 <FieldGrid cols={2}>…</FieldGrid>    <ToggleRow title="Allow credit" description="…"><Switch … /></ToggleRow>
 
 <EmptyState icon={Receipt} title="No invoices" description="…" action={<Button>…</Button>} compact />
-<PageLoader />  <DetailSkeleton />  <ErrorState message={error.message} onRetry={refetch} />
+<PageLoader />  <DetailSkeleton />  <ErrorState message={error.message} onRetry={refetch} />   {/* title defaults to "Something went wrong" */}
 
 <Money value={minor} tone="default|auto|positive|signed|muted" compact plain dashZero />
 <MoneyInput value={minor} onChange={setMinor} allowNegative hideSymbol />
