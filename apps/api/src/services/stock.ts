@@ -88,7 +88,7 @@ export async function stockAt(ctx: Ctx, variantIds: string[], locationId: string
   return map;
 }
 
-/** Total stock on hand across all locations (used for weighted-average costing). */
+/** Total stock on hand across all locations. */
 export async function stockTotals(ctx: Ctx, variantIds: string[]): Promise<Map<string, number>> {
   const unique = [...new Set(variantIds)];
   const map = new Map<string, number>();
@@ -109,7 +109,8 @@ export interface StockChange {
   locationId: string;
   /** signed */
   quantity: number;
-  unitCost: number;
+  /** Ledger amount in minor units, signed like the quantity (positive = value in). */
+  value: number;
   type: StockMovementType;
   referenceType: string;
   referenceId: string;
@@ -120,28 +121,33 @@ export interface StockChange {
 
 /** Queue stock level upserts + movement rows. */
 export function queueStockChanges(ctx: Ctx, tx: Tx, changes: StockChange[]) {
-  const relevant = changes.filter((c) => roundQty(c.quantity) !== 0);
+  const relevant = changes.filter((c) => roundQty(c.quantity) !== 0 || c.value !== 0);
   if (relevant.length === 0) return;
 
   // Aggregate per (variant, location) for the level upsert.
-  const agg = new Map<string, { variantId: string; locationId: string; quantity: number }>();
+  const agg = new Map<string, { variantId: string; locationId: string; quantity: number; value: number }>();
   for (const c of relevant) {
     const key = `${c.variantId}|${c.locationId}`;
-    const cur = agg.get(key) ?? { variantId: c.variantId, locationId: c.locationId, quantity: 0 };
+    const cur = agg.get(key) ?? { variantId: c.variantId, locationId: c.locationId, quantity: 0, value: 0 };
     cur.quantity = roundQty(cur.quantity + c.quantity);
+    cur.value += c.value;
     agg.set(key, cur);
   }
   const levelRows = [...agg.values()]
-    .filter((r) => r.quantity !== 0)
+    .filter((r) => r.quantity !== 0 || r.value !== 0)
     .map((r) => ({ businessId: ctx.businessId, ...r }));
-  for (let i = 0; i < levelRows.length; i += 24) {
+  // Five bound parameters per row, so 18 rows stay under D1's 100-parameter limit.
+  for (let i = 0; i < levelRows.length; i += 18) {
     tx.add(
       ctx.db
         .insert(stockLevels)
-        .values(levelRows.slice(i, i + 24))
+        .values(levelRows.slice(i, i + 18))
         .onConflictDoUpdate({
           target: [stockLevels.variantId, stockLevels.locationId],
-          set: { quantity: sql`round(${stockLevels.quantity} + excluded.quantity, 3)` },
+          set: {
+            quantity: sql`round(${stockLevels.quantity} + excluded.quantity, 3)`,
+            value: sql`${stockLevels.value} + excluded.value`,
+          },
         }) as unknown as Stmt,
     );
   }
@@ -158,7 +164,7 @@ export function queueStockChanges(ctx: Ctx, tx: Tx, changes: StockChange[]) {
         locationId: c.locationId,
         type: c.type,
         quantity: roundQty(c.quantity),
-        unitCost: c.unitCost,
+        unitCost: c.quantity === 0 ? 0 : roundHalfAway(Math.abs(c.value) / Math.abs(c.quantity)),
         referenceType: c.referenceType,
         referenceId: c.referenceId,
         referenceNumber: c.referenceNumber,
@@ -193,11 +199,111 @@ export async function assertStockAvailable(
   }
 }
 
-/** New weighted-average cost after receiving `qty` at `unitCost`. */
-export function weightedAverage(currentQty: number, currentCost: number, qty: number, unitCost: number) {
-  const base = Math.max(0, currentQty);
-  if (base + qty <= 0) return unitCost;
-  return roundHalfAway((base * currentCost + qty * unitCost) / (base + qty));
+interface LevelState {
+  quantity: number;
+  value: number;
+}
+
+/**
+ * Inventory costing for one business operation. It loads the stock levels (quantity and value) of the
+ * variants involved, then applies each movement to them in memory, in the order the operation lists them.
+ * Every ledger amount comes from here and is written to stock_levels.value with the movement, so the
+ * Inventory account always equals the stock valuation.
+ *
+ * Goods leave a location at that location's average cost (value ÷ quantity). Taking the last units takes
+ * the whole remaining value, so nothing is left behind on an empty location.
+ */
+export class StockCoster {
+  private readonly levels = new Map<string, Map<string, LevelState>>();
+  private readonly touched = new Set<string>();
+
+  constructor(
+    rows: { variantId: string; locationId: string; quantity: number; value: number }[],
+    private readonly costPrices: Map<string, number>,
+  ) {
+    for (const r of rows) {
+      const lv = this.level(r.variantId, r.locationId);
+      lv.quantity = r.quantity;
+      lv.value = r.value;
+    }
+  }
+
+  private level(variantId: string, locationId: string): LevelState {
+    let byLocation = this.levels.get(variantId);
+    if (!byLocation) {
+      byLocation = new Map();
+      this.levels.set(variantId, byLocation);
+    }
+    let lv = byLocation.get(locationId);
+    if (!lv) {
+      lv = { quantity: 0, value: 0 };
+      byLocation.set(locationId, lv);
+    }
+    return lv;
+  }
+
+  /** Every stock level of a variant across locations, as loaded and updated so far. */
+  entries(variantId: string): { locationId: string; quantity: number; value: number }[] {
+    return [...(this.levels.get(variantId)?.entries() ?? [])].map(([locationId, lv]) => ({ locationId, ...lv }));
+  }
+
+  /** Ledger amount (positive) for taking `qty` out of a location. Updates the in-memory level. */
+  out(variantId: string, locationId: string, qty: number): number {
+    const lv = this.level(variantId, locationId);
+    const unit = this.costPrices.get(variantId) ?? 0;
+    let amount: number;
+    if (lv.quantity > 0 && qty < lv.quantity) amount = roundHalfAway((qty * lv.value) / lv.quantity);
+    else if (lv.quantity > 0) amount = lv.value + roundHalfAway((qty - lv.quantity) * unit);
+    else amount = roundHalfAway(qty * unit);
+    lv.quantity = roundQty(lv.quantity - qty);
+    lv.value -= amount;
+    this.touched.add(variantId);
+    return amount;
+  }
+
+  /** Adds `qty` to a location at ledger amount `amount`. Updates the in-memory level. */
+  in(variantId: string, locationId: string, qty: number, amount: number) {
+    const lv = this.level(variantId, locationId);
+    lv.quantity = roundQty(lv.quantity + qty);
+    lv.value += amount;
+    this.touched.add(variantId);
+  }
+
+  /** Average-cost changes for the variants that moved, from their post-operation totals. */
+  costUpdates(): { variantId: string; costPrice: number }[] {
+    const out: { variantId: string; costPrice: number }[] = [];
+    for (const variantId of this.touched) {
+      let quantity = 0;
+      let value = 0;
+      for (const lv of this.levels.get(variantId)?.values() ?? []) {
+        quantity += lv.quantity;
+        value += lv.value;
+      }
+      if (quantity <= 0) continue;
+      const costPrice = roundHalfAway(value / quantity);
+      if (costPrice !== this.costPrices.get(variantId)) out.push({ variantId, costPrice });
+    }
+    return out;
+  }
+}
+
+/** Loads the stock levels of the given variants (all locations) into a costing session. */
+export async function loadStockCoster(ctx: Ctx, variantIds: string[], costPrices: Map<string, number>): Promise<StockCoster> {
+  const unique = [...new Set(variantIds)];
+  const rows: { variantId: string; locationId: string; quantity: number; value: number }[] = [];
+  for (let i = 0; i < unique.length; i += 90) {
+    const found = await ctx.db
+      .select({
+        variantId: stockLevels.variantId,
+        locationId: stockLevels.locationId,
+        quantity: stockLevels.quantity,
+        value: stockLevels.value,
+      })
+      .from(stockLevels)
+      .where(and(eq(stockLevels.businessId, ctx.businessId), inArray(stockLevels.variantId, unique.slice(i, i + 90))));
+    rows.push(...found);
+  }
+  return new StockCoster(rows, costPrices);
 }
 
 export function queueCostUpdate(ctx: Ctx, tx: Tx, variantId: string, costPrice: number) {

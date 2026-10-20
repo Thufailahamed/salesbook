@@ -32,7 +32,7 @@ import {
 import { getPurchaseDto, getPurchaseReturnDto } from "./purchases-read";
 import { getLocation, taxRateMap } from "./sales";
 import { reserveNumbers } from "./sequences";
-import { loadVariants, queueCostUpdate, queueStockChanges, stockAt, stockTotals } from "./stock";
+import { loadStockCoster, loadVariants, queueCostUpdate, queueStockChanges, stockAt } from "./stock";
 import { Tx } from "./tx";
 
 type PurchaseRow = typeof purchases.$inferSelect;
@@ -160,8 +160,10 @@ function lineRows(ctx: Ctx, purchaseId: string, lines: BuiltLine[]) {
   );
 }
 
-function fromStoredLines(rows: PurchaseLineRow[]): BuiltLine[] {
-  return rows.map((r) => ({
+function fromStoredLines(rows: PurchaseLineRow[], shipping: number): BuiltLine[] {
+  // Same freight split as at creation: shipping is shared out by each line's net amount.
+  const freight = allocateProportionally(shipping, rows.map((r) => r.net));
+  return rows.map((r, i) => ({
     variantId: r.variantId,
     productId: r.productId,
     name: r.name,
@@ -176,7 +178,7 @@ function fromStoredLines(rows: PurchaseLineRow[]): BuiltLine[] {
     net: r.net,
     tax: r.tax,
     total: r.total,
-    landedValue: roundHalfAway(r.landedUnitCost * r.quantity),
+    landedValue: r.net + (freight[i] ?? 0),
     landedUnitCost: r.landedUnitCost,
   }));
 }
@@ -212,21 +214,12 @@ async function queueReceive(ctx: Ctx, tx: Tx, a: ReceiveArgs) {
   const { payment: numbers } = await reserveNumbers(ctx, { payment: tenders.length + (creditUsed > 0 ? 1 : 0) });
   const shift = tenders.some((t) => t.methodType === "cash") ? await getOpenShift(ctx) : null;
 
-  // Weighted-average cost per variant.
+  // Stock comes in at the landed value the journal books, so valuation and the Inventory account agree.
   const variantIds = [...new Set(a.lines.map((l) => l.variantId))];
-  if (a.updateCostPrice) {
-    const totals = await stockTotals(ctx, variantIds);
-    const info = await loadVariants(ctx, variantIds);
-    for (const id of variantIds) {
-      const ls = a.lines.filter((l) => l.variantId === id);
-      const qty = ls.reduce((s, l) => s + l.quantity, 0);
-      const value = ls.reduce((s, l) => s + l.landedValue, 0);
-      const onHand = Math.max(0, totals.get(id) ?? 0);
-      const current = info.get(id)!.costPrice;
-      const newCost = onHand + qty > 0 ? roundHalfAway((onHand * current + value) / (onHand + qty)) : current;
-      if (newCost !== current) queueCostUpdate(ctx, tx, id, newCost);
-    }
-  }
+  const info = await loadVariants(ctx, variantIds);
+  const coster = await loadStockCoster(ctx, variantIds, new Map([...info].map(([id, v]) => [id, v.costPrice])));
+  for (const l of a.lines) coster.in(l.variantId, a.locationId, l.quantity, l.landedValue);
+  if (a.updateCostPrice) for (const u of coster.costUpdates()) queueCostUpdate(ctx, tx, u.variantId, u.costPrice);
 
   queueStockChanges(
     ctx,
@@ -236,7 +229,7 @@ async function queueReceive(ctx: Ctx, tx: Tx, a: ReceiveArgs) {
       productId: l.productId,
       locationId: a.locationId,
       quantity: l.quantity,
-      unitCost: l.landedUnitCost,
+      value: l.landedValue,
       type: "purchase" as const,
       referenceType: "purchase",
       referenceId: a.purchaseId,
@@ -484,7 +477,7 @@ export async function receivePurchase(ctx: Ctx, id: string, input: PurchaseRecei
     supplier,
     locationId: p.locationId,
     date: receivedDate,
-    lines: fromStoredLines(stored),
+    lines: fromStoredLines(stored, p.shipping),
     netTotal: p.netTotal,
     shipping: p.shipping,
     taxTotal: p.taxTotal,
@@ -598,7 +591,7 @@ export async function createPurchaseReturn(ctx: Ctx, input: PurchaseReturnInput)
       const already = proportionalLine(pl, pl.quantityReturned);
       amounts = { net: pl.net - already.net, tax: pl.tax - already.tax, total: pl.total - already.total };
     }
-    return { pl, qty, ...amounts, landedValue: roundHalfAway(qty * pl.landedUnitCost) };
+    return { pl, qty, ...amounts };
   });
 
   // Stock must be available at the purchase location.
@@ -621,7 +614,11 @@ export async function createPurchaseReturn(ctx: Ctx, input: PurchaseReturnInput)
   const net = lines.reduce((s, l) => s + l.net, 0);
   const tax = lines.reduce((s, l) => s + l.tax, 0);
   const total = net + tax;
-  const landed = lines.reduce((s, l) => s + l.landedValue, 0);
+  const variantIds = [...new Set(lines.map((l) => l.pl.variantId))];
+  const info = await loadVariants(ctx, variantIds);
+  const coster = await loadStockCoster(ctx, variantIds, new Map([...info].map(([id, v]) => [id, v.costPrice])));
+  const outs = lines.map((l) => coster.out(l.pl.variantId, p.locationId, l.qty));
+  const inventoryOut = outs.reduce((s, c) => s + c, 0);
   const appliedToBill = Math.min(total, p.amountDue);
   const remainder = total - appliedToBill;
   const refundMethod = input.settlement === "refund" && remainder > 0 ? await requireMethod(ctx, input.methodId) : null;
@@ -693,30 +690,16 @@ export async function createPurchaseReturn(ctx: Ctx, input: PurchaseReturnInput)
       .where(eq(purchases.id, p.id)) as unknown as Stmt,
   );
 
-  // Weighted-average cost after removing goods at their landed cost.
-  const variantIds = [...new Set(lines.map((l) => l.pl.variantId))];
-  const totals = await stockTotals(ctx, variantIds);
-  const info = await loadVariants(ctx, variantIds);
-  for (const vid of variantIds) {
-    const ls = lines.filter((l) => l.pl.variantId === vid);
-    const qty = ls.reduce((s, l) => s + l.qty, 0);
-    const value = ls.reduce((s, l) => s + l.landedValue, 0);
-    const onHand = totals.get(vid) ?? 0;
-    const cost = info.get(vid)!.costPrice;
-    if (onHand - qty > 0) {
-      const newCost = Math.max(0, roundHalfAway((onHand * cost - value) / (onHand - qty)));
-      if (newCost !== cost) queueCostUpdate(ctx, tx, vid, newCost);
-    }
-  }
+  for (const u of coster.costUpdates()) queueCostUpdate(ctx, tx, u.variantId, u.costPrice);
   queueStockChanges(
     ctx,
     tx,
-    lines.map((l) => ({
+    lines.map((l, i) => ({
       variantId: l.pl.variantId,
       productId: l.pl.productId,
       locationId: p.locationId,
       quantity: -l.qty,
-      unitCost: l.pl.landedUnitCost,
+      value: -outs[i]!,
       type: "purchase_return" as const,
       referenceType: "purchase_return",
       referenceId: id,
@@ -734,8 +717,8 @@ export async function createPurchaseReturn(ctx: Ctx, input: PurchaseReturnInput)
     locationId: p.locationId,
     lines: [
       { accountId: sys.payable, debit: total, ...party },
-      { accountId: sys.inventory_adjustments, debit: landed - net, memo: "Freight not recoverable" },
-      { accountId: sys.inventory, credit: landed },
+      { accountId: sys.inventory_adjustments, debit: inventoryOut - net, memo: "Cost of returned stock above the bill" },
+      { accountId: sys.inventory, credit: inventoryOut },
       { accountId: sys.input_tax, credit: tax },
     ],
   });

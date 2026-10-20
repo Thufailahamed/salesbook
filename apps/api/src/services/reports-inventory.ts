@@ -11,6 +11,7 @@ function stockSubquery(ctx: Ctx, locationId?: string) {
     .select({
       variantId: stockLevels.variantId,
       qty: sql<number>`sum(${stockLevels.quantity})`.as("qty"),
+      value: sql<number>`sum(${stockLevels.value})`.as("value"),
     })
     .from(stockLevels)
     .where(and(...conds))
@@ -46,6 +47,7 @@ export async function stockRows(
       reorderLevel: variants.reorderLevel,
       costPrice: variants.costPrice,
       price: variants.price,
+      stockValue: sql<number>`coalesce(${s.value}, 0)`,
     })
     .from(variants)
     .innerJoin(products, eq(products.id, variants.productId))
@@ -71,7 +73,7 @@ export async function stockRows(
       reorderLevel: r.reorderLevel,
       costPrice: r.costPrice,
       price: r.price,
-      value: Math.round(quantity * r.costPrice),
+      value: Math.round(num(r.stockValue)),
       retailValue: Math.round(quantity * r.price),
     };
   });
@@ -86,7 +88,7 @@ export async function stockHealth(ctx: Ctx, locationId?: string) {
     .select({
       low: sql<number>`sum(case when ${variants.isActive} = 1 and ${products.isActive} = 1 and ${qty} > 0 and ${qty} <= ${threshold} then 1 else 0 end)`,
       out: sql<number>`sum(case when ${variants.isActive} = 1 and ${products.isActive} = 1 and ${qty} <= 0 then 1 else 0 end)`,
-      value: sql<number>`coalesce(sum(round(${qty} * ${variants.costPrice})), 0)`,
+      value: sql<number>`coalesce(sum(coalesce(${s.value}, 0)), 0)`,
     })
     .from(variants)
     .innerJoin(products, eq(products.id, variants.productId))
