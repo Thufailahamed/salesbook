@@ -19,7 +19,7 @@ export default function Page() {
 function EditProduct() {
   const id = useSearchParams().get("id");
   const { data, isLoading, error, refetch } = useApiQuery<Product>(id ? `/products/${id}` : null, undefined, { staleTime: 0 });
-  if (!id) return <ErrorState message="No product selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No product selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !data) return <ErrorState message={error?.message ?? "Product not found"} onRetry={() => refetch()} />;
   return (

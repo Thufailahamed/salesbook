@@ -25,7 +25,7 @@ export default function Page() {
 function AdjustmentView() {
   const id = useSearchParams().get("id");
   const { data: a, isLoading, error, refetch } = useApiQuery<StockAdjustment>(id ? `/inventory/adjustments/${id}` : null);
-  if (!id) return <ErrorState message="No adjustment selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No adjustment selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !a) return <ErrorState message={error?.message ?? "Adjustment not found"} onRetry={() => refetch()} />;
 

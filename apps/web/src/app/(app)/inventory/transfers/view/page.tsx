@@ -23,7 +23,7 @@ export default function Page() {
 function TransferView() {
   const id = useSearchParams().get("id");
   const { data: t, isLoading, error, refetch } = useApiQuery<StockTransfer>(id ? `/inventory/transfers/${id}` : null);
-  if (!id) return <ErrorState message="No transfer selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No transfer selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !t) return <ErrorState message={error?.message ?? "Transfer not found"} onRetry={() => refetch()} />;
 

@@ -64,7 +64,7 @@ function ProductView() {
     { invalidate: ["/products"], success: "Product restored" },
   );
 
-  if (!id) return <ErrorState message="No product selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No product selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !p) return <ErrorState message={error?.message ?? "Product not found"} onRetry={() => refetch()} />;
 

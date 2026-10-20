@@ -80,7 +80,7 @@ function CustomerView() {
     },
   );
 
-  if (!id) return <ErrorState message="No customer selected." />;
+  if (!id) return <ErrorState title="Nothing selected" message="No customer selected." />;
   if (isLoading) return <DetailSkeleton />;
   if (error || !c) return <ErrorState message={error?.message ?? "Customer not found"} onRetry={() => refetch()} />;
 
