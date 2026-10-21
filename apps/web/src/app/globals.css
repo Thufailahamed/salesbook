@@ -383,6 +383,95 @@
   }
 }
 
+/* ------------------------------------------------------------------ marketing motion */
+
+@keyframes sb-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes sb-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+@keyframes sb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes sb-scan {
+  0%,
+  100% {
+    top: 10%;
+  }
+  50% {
+    top: 86%;
+  }
+}
+@keyframes sb-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.35em);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes sb-ticker {
+  from {
+    opacity: 0;
+    transform: translateY(70%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes sb-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+    background-color: color-mix(in oklch, var(--highlight) 22%, transparent);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity 0.9s cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.reveal[data-shown] {
+  opacity: 1;
+  transform: none;
+}
+.text-outline {
+  color: transparent;
+  -webkit-text-stroke: 1.2px var(--border-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .motion-anim {
+    animation: none !important;
+  }
+}
+
 /* thin scrollbars on webkit */
 *::-webkit-scrollbar {
   width: 10px;

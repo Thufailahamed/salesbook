@@ -157,7 +157,7 @@ export default function SignupPage() {
       const res = await api.post<AuthResponse>("/auth/signup", body);
       qc.clear();
       qc.setQueryData(["/auth/me", {}], res);
-      router.replace("/");
+      router.replace("/dashboard");
     } catch (err) {
       setLoading(false);
       if (err instanceof ApiError && err.status === 409) {

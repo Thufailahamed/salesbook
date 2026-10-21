@@ -8,6 +8,7 @@ apps/web/src
 ├── app/
 │   ├── layout.tsx              root: fonts, globals.css, AppProviders, no-flash theme script
 │   ├── globals.css             design tokens (OKLCH) for light + dark, utilities (.num, .label-caps), print CSS
+│   ├── page.tsx                public marketing home "/" (components/marketing/landing.tsx); dashboard lives at /dashboard
 │   ├── (auth)/login|signup     split-screen auth (no session)
 │   ├── (app)/…                 AuthGuard + AppShell (sidebar, top bar, ⌘K palette). All business pages live here.
 │   ├── (pos)/pos               AuthGuard, full-screen, no sidebar

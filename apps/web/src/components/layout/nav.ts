@@ -47,7 +47,7 @@ export const NAV: NavGroup[] = [
   {
     label: "Overview",
     items: [
-      { label: "Dashboard", href: "/", icon: LayoutDashboard, permission: "dashboard.view", keywords: ["home", "kpi"] },
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "dashboard.view", keywords: ["home", "kpi"] },
       { label: "Point of sale", href: "/pos", icon: ShoppingCart, permission: "pos.sell", keywords: ["pos", "sell", "checkout", "register", "till"] },
     ],
   },
