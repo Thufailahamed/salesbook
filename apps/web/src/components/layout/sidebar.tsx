@@ -82,7 +82,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
       )}
     >
       <div className={cn("flex h-16 shrink-0 items-center", collapsed ? "justify-center px-2" : "px-6")}>
-        <Link href="/" className="min-w-0">
+        <Link href="/dashboard" className="min-w-0">
           <Brand collapsed={collapsed} />
         </Link>
       </div>

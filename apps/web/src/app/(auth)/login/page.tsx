@@ -14,7 +14,7 @@ import { api, errorMessage } from "@/lib/api";
 import { usePageTitle } from "@/components/page-header";
 
 function safeNext(next: string | null): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/login")) return "/";
+  if (!next || next === "/" || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/login")) return "/dashboard";
   return next;
 }
 

@@ -32,7 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <SheetContent side="left" className="w-[280px] border-sidebar-border bg-sidebar p-0 text-sidebar-accent-foreground" hideClose>
             <SheetTitle className="sr-only">Navigation</SheetTitle>
             <div className="flex h-16 items-center px-5">
-              <Link href="/">
+              <Link href="/dashboard">
                 <Brand />
               </Link>
             </div>

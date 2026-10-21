@@ -127,7 +127,7 @@ function PointOfSale() {
 
   const allowed = can("pos.sell") || can("sales.return");
   React.useEffect(() => {
-    if (!allowed) router.replace("/");
+    if (!allowed) router.replace("/dashboard");
   }, [allowed, router]);
 
   const customer = useApiQuery<Customer>(cart.customerId ? `/customers/${cart.customerId}` : null);
@@ -353,7 +353,7 @@ function PointOfSale() {
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-3 sm:px-4">
         <Hint label="Back to the office">
           <Button variant="ghost" size="icon-sm" asChild>
-            <Link href={can("dashboard.view") ? "/" : "/sales"} aria-label="Back">
+            <Link href={can("dashboard.view") ? "/dashboard" : "/sales"} aria-label="Back">
               <ArrowLeft />
             </Link>
           </Button>
