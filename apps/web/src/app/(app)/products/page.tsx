@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Barcode, Download, Package, Plus, Tags } from "lucide-react";
+import { Barcode, Download, Package, Plus, Tags, Upload, Zap } from "lucide-react";
 import { toast } from "sonner";
 import type { Brand, Category, Paginated, ProductListItem } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
@@ -166,6 +166,16 @@ function ProductsPage() {
         description="Everything you sell, with prices, variants and stock on hand."
         actions={
           <>
+            {can("products.manage") && (
+              <Button variant="outline" asChild>
+                <Link href="/products/quick-add"><Zap /> Quick add</Link>
+              </Button>
+            )}
+            {can("products.manage") && (
+              <Button variant="outline" asChild className="hidden sm:inline-flex">
+                <Link href="/products/import"><Upload /> Import</Link>
+              </Button>
+            )}
             <Button variant="outline" onClick={exportCsv} loading={exporting}>
               <Download /> Export
             </Button>

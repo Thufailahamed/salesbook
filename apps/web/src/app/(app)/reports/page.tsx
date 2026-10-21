@@ -1,21 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  Boxes,
-  ChartColumn,
-  FileSpreadsheet,
-  HandCoins,
-  Landmark,
-  Package,
-  Percent,
-  Scale,
-  TrendingUp,
-  Wallet,
-  WalletCards,
-  Waves,
-  type LucideIcon,
-} from "lucide-react";
+import { Boxes, CalendarClock, ChartColumn, FileSpreadsheet, HandCoins, Landmark, Package, PackageX, Percent, Scale, TrendingUp, type LucideIcon, Wallet, WalletCards, Waves } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { useSession } from "@/hooks/use-session";
 
@@ -48,6 +34,8 @@ const GROUPS: { title: string; items: { href: string; label: string; description
     title: "Inventory & costs",
     items: [
       { href: "/reports/inventory", label: "Inventory valuation", description: "Stock quantity and value by item and category.", icon: Boxes },
+      { href: "/reports/expiry", label: "Expiry & shelf life", description: "Stock that has expired or is about to.", icon: CalendarClock },
+      { href: "/reports/dead-stock", label: "Dead & slow stock", description: "Items that have not sold recently.", icon: PackageX },
       { href: "/reports/expenses", label: "Expense report", description: "Spending by category over time.", icon: Wallet },
     ],
   },

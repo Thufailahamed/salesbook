@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Package, ScanBarcode } from "lucide-react";
 import { toast } from "sonner";
-import type { SellableItem } from "@shopbooks/shared";
+import { promoPrice, type SellableItem } from "@shopbooks/shared";
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
@@ -117,8 +117,11 @@ export const VariantPicker = React.forwardRef<HTMLInputElement, VariantPickerPro
     }
   };
 
-  const price = (i: SellableItem) =>
-    showPrice === "cost" ? i.costPrice : priceTier === "wholesale" && i.wholesalePrice ? i.wholesalePrice : i.price;
+  const price = (i: SellableItem) => {
+    if (showPrice === "cost") return i.costPrice;
+    const tier = priceTier === "wholesale" && i.wholesalePrice ? i.wholesalePrice : i.price;
+    return promoPrice(tier, i.promotion);
+  };
 
   return (
     <Command shouldFilter={false} loop className={cn("h-auto overflow-visible bg-transparent", className)}>

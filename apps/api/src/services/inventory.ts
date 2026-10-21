@@ -12,7 +12,7 @@ import { badRequest } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { getLocation } from "./sales";
 import { reserveNumbers } from "./sequences";
-import { loadStockCoster, loadVariants, queueCostUpdate, queueStockChanges, stockAt } from "./stock";
+import { expiredLotDate, loadStockCoster, loadVariants, queueCostUpdate, queueStockChanges, stockAt, type LotQty } from "./stock";
 import { Tx } from "./tx";
 
 export interface OpeningStockItem {
@@ -155,10 +155,12 @@ export async function createAdjustment(ctx: Ctx, input: StockAdjustmentInput) {
       const unitCost = m.unitCost ?? v.costPrice;
       const value = roundHalfAway(m.change * unitCost);
       coster.in(variantId, location.id, m.change, value);
-      return { variantId, productId: v.productId, before, change: m.change, unitCost, value };
+      return { variantId, productId: v.productId, before, change: m.change, unitCost, value, lots: undefined };
     }
-    const value = -coster.out(variantId, location.id, -m.change);
-    return { variantId, productId: v.productId, before, change: m.change, unitCost: roundHalfAway(value / m.change), value };
+    // Write-offs take the earliest-expiring stock first.
+    const taken = coster.outLots(variantId, location.id, -m.change);
+    const value = -taken.amount;
+    return { variantId, productId: v.productId, before, change: m.change, unitCost: roundHalfAway(value / m.change), value, lots: taken.lots };
   });
   const totalValue = lines.reduce((s, l) => s + l.value, 0);
 
@@ -202,6 +204,7 @@ export async function createAdjustment(ctx: Ctx, input: StockAdjustmentInput) {
       locationId: location.id,
       quantity: l.change,
       value: l.value,
+      lots: l.lots,
       type: input.reason === "opening" ? ("opening" as const) : ("adjustment" as const),
       referenceType: "adjustment",
       referenceId: id,
@@ -290,8 +293,13 @@ export async function createTransfer(ctx: Ctx, input: StockTransferInput) {
     tx,
     lines.flatMap(([variantId, quantity]) => {
       const v = info.get(variantId)!;
-      const amount = coster.out(variantId, from.id, quantity);
-      coster.in(variantId, to.id, quantity, amount);
+      const taken = coster.outLots(variantId, from.id, quantity);
+      const expired = expiredLotDate(taken.lots, ctx.today);
+      if (expired) throw badRequest(`${v.displayName} has stock that expired on ${expired}. Write it off before moving it.`);
+      const amount = taken.amount;
+      // The expiry dates travel with the goods.
+      const arrived = taken.lots.map((l) => ({ expiry: l.expiry, quantity: -l.quantity }));
+      coster.in(variantId, to.id, quantity, amount, arrived);
       const base = {
         variantId,
         productId: v.productId,
@@ -301,8 +309,8 @@ export async function createTransfer(ctx: Ctx, input: StockTransferInput) {
         date,
       };
       return [
-        { ...base, locationId: from.id, quantity: -quantity, value: -amount, type: "transfer_out" as const, note: `To ${to.name}` },
-        { ...base, locationId: to.id, quantity, value: amount, type: "transfer_in" as const, note: `From ${from.name}` },
+        { ...base, locationId: from.id, quantity: -quantity, value: -amount, lots: taken.lots, type: "transfer_out" as const, note: `To ${to.name}` },
+        { ...base, locationId: to.id, quantity, value: amount, lots: arrived, type: "transfer_in" as const, note: `From ${from.name}` },
       ];
     }),
   );

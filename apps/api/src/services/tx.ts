@@ -3,6 +3,7 @@ import type { JournalSourceType, PartyType } from "@shopbooks/shared";
 import { auditLogs, journalEntries, journalLines } from "../db/schema";
 import { insertMany, runBatch, type Stmt } from "../lib/batch";
 import type { Ctx } from "../lib/context";
+import { badRequest } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { reserveNumbers } from "./sequences";
 
@@ -61,6 +62,8 @@ export class Tx {
 
   /** Queue a balanced journal entry. Returns its id (or null when it nets to nothing). */
   journal(entry: PostEntry): string | null {
+    const closed = this.ctx.business.booksClosedThrough;
+    if (closed && entry.date <= closed) throw badRequest(`The books are closed through ${closed}. Post on a later date.`);
     const lines = normaliseLines(entry.lines);
     if (lines.length === 0) return null;
     const dr = lines.reduce((s, l) => s + l.debit, 0);
@@ -156,6 +159,9 @@ export async function queueReversals(
   if (entryIds.length === 0) return;
   const entries = await ctx.db.select().from(journalEntries).where(inArray(journalEntries.id, entryIds));
   const lines = await ctx.db.select().from(journalLines).where(inArray(journalLines.entryId, entryIds));
+  if (lines.some((l) => l.reconciliationId)) {
+    throw badRequest("A reconciled entry can't be reversed. Undo the reconciliation first.");
+  }
   for (const e of entries) {
     if (e.reversedById) continue;
     tx.journal({

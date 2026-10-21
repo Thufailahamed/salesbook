@@ -2,8 +2,8 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { Building2, CreditCard, Hash, MapPin, MoreHorizontal, Pencil, Percent, Plus, Trash2 } from "lucide-react";
-import type { Business, BusinessSettingsInput, Location, LocationInput, PaymentMethod, PaymentMethodInput, Sequence, TaxRate, TaxRateInput } from "@shopbooks/shared";
+import { Building2, CreditCard, Gem, Globe, Hash, MapPin, MoreHorizontal, Pencil, Percent, Plus, Trash2 } from "lucide-react";
+import type { GatewaySettings, GatewaySettingsInput, Business, BusinessSettingsInput, Location, LocationInput, PaymentMethod, PaymentMethodInput, Sequence, TaxRate, TaxRateInput } from "@shopbooks/shared";
 import { CURRENCIES, PAYMENT_METHOD_TYPES, PAYMENT_METHOD_TYPE_LABELS, SEQUENCE_DEFAULTS, type PaymentMethodType } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
@@ -15,7 +15,7 @@ import { PercentInput } from "@/components/money-input";
 import { AccountPicker } from "@/components/account-picker";
 import { PageLoader } from "@/components/loading";
 import { useConfirm } from "@/components/confirm-dialog";
-import { PAYMENT_METHOD_ICONS } from "@/components/entity-selects";
+import { PAYMENT_METHOD_ICONS, PaymentMethodSelect } from "@/components/entity-selects";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ import { useApiMutation, useApiQuery } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
 import { api, assetUrl, errorMessage } from "@/lib/api";
 import { toast } from "sonner";
+import { BillingPanel } from "@/components/billing-panel";
 
 export default function Page() {
   return (
@@ -42,6 +43,7 @@ export default function Page() {
 function SettingsPage() {
   const params = useSearchParams();
   const [tab, setTab] = React.useState(params.get("tab") ?? "business");
+  const { can } = useSession();
   return (
     <>
       <PageHeader title="Settings" description="Your business, locations, taxes, payment methods and numbering." />
@@ -51,12 +53,16 @@ function SettingsPage() {
           <TabsTrigger value="locations"><MapPin /> Locations</TabsTrigger>
           <TabsTrigger value="taxes"><Percent /> Taxes</TabsTrigger>
           <TabsTrigger value="payments"><CreditCard /> Payment methods</TabsTrigger>
+          <TabsTrigger value="online"><Globe /> Online payments</TabsTrigger>
+          <TabsTrigger value="billing"><Gem /> Subscription</TabsTrigger>
           <TabsTrigger value="numbering"><Hash /> Numbering</TabsTrigger>
         </TabsList>
         <TabsContent value="business"><BusinessTab /></TabsContent>
         <TabsContent value="locations"><LocationsTab /></TabsContent>
         <TabsContent value="taxes"><TaxesTab /></TabsContent>
         <TabsContent value="payments"><PaymentMethodsTab /></TabsContent>
+        <TabsContent value="online"><OnlinePaymentsTab /></TabsContent>
+        <TabsContent value="billing"><BillingPanel canManage={can("settings.manage")} /></TabsContent>
         <TabsContent value="numbering"><NumberingTab /></TabsContent>
       </Tabs>
     </>
@@ -486,6 +492,49 @@ function MethodDialog({ open, onOpenChange, method }: { open: boolean; onOpenCha
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------- online payments (payments.lk)
+
+function OnlinePaymentsTab() {
+  const { data, isLoading } = useApiQuery<GatewaySettings>("/gateway/settings");
+  const [enabled, setEnabled] = React.useState(false);
+  const [secretKey, setSecretKey] = React.useState("");
+  const [webhookSecret, setWebhookSecret] = React.useState("");
+  const [methodId, setMethodId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (data) { setEnabled(data.isEnabled); setMethodId(data.methodId); setSecretKey(""); setWebhookSecret(""); }
+  }, [data]);
+  const save = useApiMutation((b: GatewaySettingsInput) => api.put<GatewaySettings>("/gateway/settings", b), {
+    invalidate: ["/gateway"],
+    success: "Online payment settings saved",
+  });
+  if (isLoading || !data) return <PageLoader />;
+  return (
+    <SectionCard title="payments.lk" description="Accept card payments on invoices through a hosted payments.lk checkout. Paid invoices are settled automatically from the signed webhook.">
+      <form
+        className="grid max-w-xl gap-4"
+        onSubmit={(e) => { e.preventDefault(); save.mutate({ isEnabled: enabled, secretKey: secretKey || null, webhookSecret: webhookSecret || null, methodId }); }}
+      >
+        <ToggleRow title="Enable online payments" description="Shows “Pay online” on unpaid invoices.">
+          <Switch checked={enabled} onCheckedChange={setEnabled} />
+        </ToggleRow>
+        <Field label="Secret key" hint={data.hasSecretKey ? `Saved (${data.mode} mode). Leave blank to keep it.` : "From the payments.lk dashboard — starts with sk_test_ or sk_live_."}>
+          <Input type="password" autoComplete="off" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} placeholder={data.hasSecretKey ? "••••••••••••" : "sk_test_…"} />
+        </Field>
+        <Field label="Webhook signing secret" hint={data.hasWebhookSecret ? "Saved. Leave blank to keep it." : "Shown when you create the webhook endpoint."}>
+          <Input type="password" autoComplete="off" value={webhookSecret} onChange={(e) => setWebhookSecret(e.target.value)} placeholder={data.hasWebhookSecret ? "••••••••••••" : "whsec_…"} />
+        </Field>
+        <Field label="Record receipts as" hint="Payment method (and ledger account) that online receipts settle into.">
+          <PaymentMethodSelect value={methodId} onChange={setMethodId} />
+        </Field>
+        <Field label="Webhook endpoint" hint="Add this URL in the payments.lk dashboard and subscribe to payment.succeeded, payment.failed and checkout.expired.">
+          <Input readOnly className="font-mono text-[12.5px]" value={data.webhookUrl} onFocus={(e) => e.currentTarget.select()} />
+        </Field>
+        <div><Button type="submit" loading={save.isPending}>Save</Button></div>
+      </form>
+    </SectionCard>
   );
 }
 

@@ -1,5 +1,6 @@
-import { and, eq, gt, gte, lte, sql, type SQL } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import {
+  addDays,
   daysBetween,
   type AccountAmount,
   type AgingReport,
@@ -8,9 +9,12 @@ import {
   type CashFlowReport,
   type ExpenseReport,
   type ProfitLossReport,
+  type ProfitLossSummary,
   type TaxReport,
   type TrialBalanceReport,
   type AccountType,
+  type CashFlowLine,
+  type CashFlowSection,
 } from "@shopbooks/shared";
 import {
   accounts,
@@ -18,6 +22,7 @@ import {
   expenses,
   invoiceLines,
   invoices,
+  journalLines,
   purchaseLines,
   purchaseReturns,
   purchases,
@@ -37,6 +42,23 @@ const sum = (rows: AccountAmount[]) => rows.reduce((s, r) => s + r.amount, 0);
 // ---------------------------------------------------------------- profit & loss
 
 export async function profitLoss(ctx: Ctx, f: { from: string; to: string; locationId?: string }): Promise<ProfitLossReport> {
+  const current = await profitLossPeriod(ctx, f);
+  const days = daysBetween(f.from, f.to) + 1;
+  const prevTo = addDays(f.from, -1);
+  const prev = await profitLossPeriod(ctx, { from: addDays(prevTo, 1 - days), to: prevTo, locationId: f.locationId });
+  const previous: ProfitLossSummary = {
+    from: prev.from,
+    to: prev.to,
+    netRevenue: prev.netRevenue,
+    totalCostOfSales: prev.totalCostOfSales,
+    grossProfit: prev.grossProfit,
+    totalExpenses: prev.totalExpenses,
+    netProfit: prev.netProfit,
+  };
+  return { ...current, previous };
+}
+
+async function profitLossPeriod(ctx: Ctx, f: { from: string; to: string; locationId?: string }): Promise<Omit<ProfitLossReport, "previous">> {
   const [accs, sums] = await Promise.all([
     loadAccounts(ctx),
     accountSums(ctx, { from: f.from, to: f.to, locationId: f.locationId }),
@@ -156,10 +178,11 @@ export async function trialBalance(ctx: Ctx, asOf: string): Promise<TrialBalance
 }
 
 export async function cashFlow(ctx: Ctx, f: { from: string; to: string }): Promise<CashFlowReport> {
-  const [accs, opening, period] = await Promise.all([
+  const [accs, opening, period, activities] = await Promise.all([
     loadAccounts(ctx),
     accountSums(ctx, { before: f.from }),
     accountSums(ctx, { from: f.from, to: f.to }),
+    cashActivities(ctx, f),
   ]);
   const rows = accs
     .filter((a) => a.type === "asset" && (a.subtype === "cash" || a.subtype === "bank"))
@@ -182,15 +205,97 @@ export async function cashFlow(ctx: Ctx, f: { from: string; to: string }): Promi
     })
     .filter((r) => r.active || r.opening !== 0 || r.inflow !== 0 || r.outflow !== 0)
     .map(({ active: _a, ...r }) => r);
+  const totalOpening = rows.reduce((s, r) => s + r.opening, 0);
+  const totalClosing = rows.reduce((s, r) => s + r.closing, 0);
   return {
     from: f.from,
     to: f.to,
     accounts: rows,
-    totalOpening: rows.reduce((s, r) => s + r.opening, 0),
+    totalOpening,
     totalInflow: rows.reduce((s, r) => s + r.inflow, 0),
     totalOutflow: rows.reduce((s, r) => s + r.outflow, 0),
-    totalClosing: rows.reduce((s, r) => s + r.closing, 0),
+    totalClosing,
+    activities,
+    netChange: activities.operating.total + activities.investing.total + activities.financing.total,
   };
+}
+
+/**
+ * Direct-method activity split. Each journal entry that moves cash is classified by the non-cash account it was
+ * paid against: fixed assets are investing, equity and long-term loans are financing, everything else is operating.
+ * Cash-to-cash moves (transfers between cash, bank and wallet accounts) net to zero and are left out.
+ */
+async function cashActivities(ctx: Ctx, f: { from: string; to: string }): Promise<CashFlowReport["activities"]> {
+  const [accs, cashIds] = await Promise.all([loadAccounts(ctx), cashAccountIds(ctx)]);
+  const byId = new Map(accs.map((a) => [a.id, a]));
+  const empty = (): CashFlowSection => ({ items: [], total: 0 });
+  const result = { operating: empty(), investing: empty(), financing: empty() };
+  if (cashIds.size === 0) return result;
+
+  const cashList = sql.join([...cashIds].map((id) => sql`${id}`), sql`, `);
+  const rows = await ctx.db
+    .select({
+      entryId: journalLines.entryId,
+      accountId: journalLines.accountId,
+      debit: journalLines.debit,
+      credit: journalLines.credit,
+    })
+    .from(journalLines)
+    .where(
+      and(
+        eq(journalLines.businessId, ctx.businessId),
+        sql`${journalLines.entryId} in (
+          select c.entry_id from ${journalLines} c
+          where c.business_id = ${ctx.businessId} and c.date >= ${f.from} and c.date <= ${f.to}
+            and c.account_id in (${cashList}))`,
+      ),
+    );
+
+  const byEntry = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const list = byEntry.get(r.entryId);
+    if (list) list.push(r);
+    else byEntry.set(r.entryId, [r]);
+  }
+
+  const items = { operating: new Map<string, CashFlowLine>(), investing: new Map<string, CashFlowLine>(), financing: new Map<string, CashFlowLine>() };
+  for (const lines of byEntry.values()) {
+    let cashDelta = 0;
+    let counter: { accountId: string; amount: number } | null = null;
+    for (const l of lines) {
+      const net = num(l.debit) - num(l.credit);
+      if (cashIds.has(l.accountId)) {
+        cashDelta += net;
+        continue;
+      }
+      if (!counter || Math.abs(net) > Math.abs(counter.amount)) counter = { accountId: l.accountId, amount: net };
+    }
+    if (cashDelta === 0 || !counter) continue;
+    const acc = byId.get(counter.accountId);
+    if (!acc) continue;
+    const bucket: keyof typeof items =
+      acc.subtype === "fixed_asset"
+        ? "investing"
+        : acc.type === "equity" || acc.subtype === "long_term_liability"
+          ? "financing"
+          : "operating";
+    const line = items[bucket].get(acc.id) ?? { accountId: acc.id, code: acc.code, name: acc.name, amount: 0 };
+    line.amount += cashDelta;
+    items[bucket].set(acc.id, line);
+  }
+  for (const key of ["operating", "investing", "financing"] as const) {
+    const list = [...items[key].values()].filter((l) => l.amount !== 0).sort((a, b) => a.code.localeCompare(b.code));
+    result[key] = { items: list, total: list.reduce((s, l) => s + l.amount, 0) };
+  }
+  return result;
+}
+
+async function cashAccountIds(ctx: Ctx) {
+  const rows = await ctx.db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.businessId, ctx.businessId), eq(accounts.type, "asset"), inArray(accounts.subtype, ["cash", "bank"])));
+  return new Set(rows.map((r) => r.id));
 }
 
 // ---------------------------------------------------------------- tax

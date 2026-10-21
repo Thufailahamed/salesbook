@@ -1,6 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftRight,
+  CalendarCheck,
+  BadgePercent,
   ArrowRightLeft,
   Barcode,
   BookOpen,
@@ -24,6 +26,7 @@ import {
   Undo2,
   UserCog,
   Users,
+  Landmark,
   Vault,
   Wallet,
 } from "lucide-react";
@@ -65,6 +68,7 @@ export const NAV: NavGroup[] = [
       { label: "Products", href: "/products", icon: Package, permission: "products.view", keywords: ["items", "sku", "variants"] },
       { label: "Categories & brands", href: "/products/categories", icon: Tags, permission: "products.manage", keywords: ["units", "brands"] },
       { label: "Barcode labels", href: "/products/labels", icon: Barcode, permission: "products.view", keywords: ["print", "tags", "stickers"] },
+      { label: "Promotions", href: "/promotions", icon: BadgePercent, permission: "products.view", keywords: ["offers", "discount", "sale", "special price"] },
     ],
   },
   {
@@ -104,6 +108,9 @@ export const NAV: NavGroup[] = [
     items: [
       { label: "Chart of accounts", href: "/accounting", icon: BookOpen, permission: "accounting.view", keywords: ["ledger", "coa"] },
       { label: "Journals", href: "/accounting/journals", icon: NotebookPen, permission: "accounting.view", keywords: ["journal entries", "gl"] },
+      { label: "Bank reconciliation", href: "/accounting/reconcile", icon: Landmark, permission: "accounting.view", keywords: ["bank statement", "clear", "cash count"] },
+      { label: "Fixed assets", href: "/accounting/assets", icon: Boxes, permission: "accounting.view", keywords: ["equipment", "depreciation", "fittings"] },
+      { label: "Period close", href: "/accounting/close", icon: CalendarCheck, permission: "accounting.view", keywords: ["lock", "books closed", "depreciation", "month end"] },
     ],
   },
   {

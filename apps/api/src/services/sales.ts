@@ -11,6 +11,7 @@ import {
   type CheckoutResponse,
   type InvoicePaymentInput,
   type PriceTier,
+  promoPrice,
 } from "@shopbooks/shared";
 import {
   heldSales,
@@ -46,7 +47,7 @@ import {
 } from "./payments";
 import { getInvoiceDto, getReturnDto } from "./sales-read";
 import { reserveNumbers } from "./sequences";
-import { assertStockAvailable, loadStockCoster, loadVariants, queueStockChanges, type StockChange } from "./stock";
+import { assertStockAvailable, expiredLotDate, loadStockCoster, loadVariants, queueStockChanges, type StockChange } from "./stock";
 import { Tx, queueReversals } from "./tx";
 
 export type InvoiceRow = typeof invoices.$inferSelect;
@@ -154,7 +155,8 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
       if (!v.allowDecimal && !Number.isInteger(l.quantity)) {
         throw badRequest(`${v.displayName} can only be sold in whole units`);
       }
-      const expected = priceTier === "wholesale" && v.wholesalePrice != null ? v.wholesalePrice : v.price;
+      const tierPrice = priceTier === "wholesale" && v.wholesalePrice != null ? v.wholesalePrice : v.price;
+      const expected = promoPrice(tierPrice, v.promotion);
       if (l.unitPrice !== expected && !ctx.can("pos.priceOverride")) {
         throw badRequest(`You don't have permission to change the price of ${v.displayName}`);
       }
@@ -320,7 +322,18 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
   // ---------------------------------------------------------------- invoice
   if (invoiceId && invoiceNumber) {
     const amountPaid = appliedToExchange + tt.total;
-    const lineCosts = saleLines.map((l) => (l.track && l.variantId ? coster.out(l.variantId, location.id, l.quantity) : 0));
+    const taken = saleLines.map((l) =>
+      l.track && l.variantId ? coster.outLots(l.variantId, location.id, l.quantity) : { amount: 0, lots: [] },
+    );
+    for (const [i, t] of taken.entries()) {
+      const expired = expiredLotDate(t.lots, ctx.today);
+      if (expired) {
+        throw badRequest(
+          `${saleLines[i]!.name} has stock that expired on ${expired}. Write it off under Inventory → Adjustments (reason: Expired) before selling.`,
+        );
+      }
+    }
+    const lineCosts = taken.map((t) => t.amount);
     const costTotal = lineCosts.reduce((s, c) => s + c, 0);
     tx.add(
       ctx.db.insert(invoices).values({
@@ -403,6 +416,7 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
         locationId: location.id,
         quantity: -l.quantity,
         value: -lineCosts[i]!,
+        lots: taken[i]!.lots,
         type: "sale",
         referenceType: "invoice",
         referenceId: invoiceId,

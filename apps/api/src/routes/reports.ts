@@ -25,6 +25,7 @@ import {
   trialBalance,
 } from "../services/reports-finance";
 import { inventoryValuation, stockHealth, stockRows } from "../services/reports-inventory";
+import { deadStockReport, expiryReport } from "../services/reports-stock";
 import {
   categorySales,
   collections,
@@ -220,6 +221,23 @@ app.get("/tax", view, vQuery(reportQuerySchema), async (c) => {
 app.get("/inventory-valuation", view, vQuery(reportQuerySchema), async (c) => {
   const ctx = c.get("ctx");
   return c.json(await inventoryValuation(ctx, c.req.valid("query").locationId || undefined));
+});
+
+const stockHealthQuery = z.object({
+  locationId: z.string().optional(),
+  days: z.coerce.number().int().min(1).max(730).default(30),
+});
+
+app.get("/expiry", view, vQuery(stockHealthQuery), async (c) => {
+  const ctx = c.get("ctx");
+  const q = c.req.valid("query");
+  return c.json(await expiryReport(ctx, { locationId: q.locationId || undefined, days: q.days }));
+});
+
+app.get("/dead-stock", view, vQuery(stockHealthQuery), async (c) => {
+  const ctx = c.get("ctx");
+  const q = c.req.valid("query");
+  return c.json(await deadStockReport(ctx, { locationId: q.locationId || undefined, days: q.days }));
 });
 
 app.get("/receivables-aging", view, vQuery(reportQuerySchema), async (c) => {

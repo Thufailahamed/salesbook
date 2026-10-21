@@ -1,3 +1,4 @@
+import { businessSubscription } from "./billing";
 import { and, asc, eq } from "drizzle-orm";
 import {
   permissionsFor,
@@ -46,6 +47,7 @@ export function mapBusiness(b: BusinessRow): Business {
     loyaltyMinRedeem: b.loyaltyMinRedeem,
     returnWindowDays: b.returnWindowDays,
     creditDueDays: b.creditDueDays,
+    booksClosedThrough: b.booksClosedThrough,
     createdAt: b.createdAt,
   };
 }
@@ -121,5 +123,6 @@ export async function buildMe(ctx: Ctx): Promise<MeResponse> {
     taxRates: taxes.map(mapTaxRate),
     paymentMethods: methods,
     permissions: permissionsFor(user.role as Role),
+    subscription: await businessSubscription(ctx.db, ctx.business),
   };
 }

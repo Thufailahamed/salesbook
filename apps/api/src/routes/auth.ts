@@ -15,9 +15,10 @@ import type { AppEnv } from "../env";
 import { SESSION_COOKIE, clientIp, createSession, destroySession, requireAuth } from "../lib/auth";
 import { createCtx } from "../lib/context";
 import { hashPassword, sha256, verifyPassword } from "../lib/crypto";
-import { badRequest, conflict, unauthorized } from "../lib/errors";
+import { ApiError, badRequest, conflict, unauthorized } from "../lib/errors";
 import { vJson } from "../lib/validate";
 import { buildMe } from "../services/me";
+import { businessSubscription, publicPlans } from "../services/billing";
 import { createBusiness } from "../services/setup";
 
 const app = new Hono<AppEnv>();
@@ -30,6 +31,7 @@ async function authResponse(c: Parameters<typeof createSession>[0], userId: stri
     .innerJoin(businesses, eq(businesses.id, users.businessId))
     .where(eq(users.id, userId));
   if (!row) throw unauthorized();
+  if (row.business.status === "suspended") throw new ApiError(403, "shop_suspended", "This shop has been suspended. Contact support.");
   const token = await createSession(c, row.user.id, row.business.id);
   const ctx = createCtx({
     db,
@@ -46,6 +48,9 @@ async function authResponse(c: Parameters<typeof createSession>[0], userId: stri
 app.post("/signup", vJson(signupSchema), async (c) => {
   const input = c.req.valid("json");
   const db = createDb(c.env.DB);
+  if ((await publicPlans(db)).paymentRequired) {
+    throw new ApiError(402, "payment_required", "Choose a plan and pay to create your shop.");
+  }
   const email = input.email.toLowerCase();
   const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
   if (existing) throw conflict("An account with this email already exists. Sign in instead.");

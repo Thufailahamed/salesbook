@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ArrowDownLeft, ArrowUpRight, Banknote, Landmark } from "lucide-react";
-import type { CashFlowReport } from "@shopbooks/shared";
+import type { CashFlowLine, CashFlowReport, CashFlowSection } from "@shopbooks/shared";
 import { ReportPage } from "@/components/report-shell";
 import { SectionCard } from "@/components/section-card";
 import { StatCard } from "@/components/stat-card";
@@ -10,29 +10,73 @@ import { Money } from "@/components/money";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useMoney } from "@/hooks/use-money";
 
+const ACTIVITY_LABELS = {
+  operating: "Operating activities",
+  investing: "Investing activities",
+  financing: "Financing activities",
+} as const;
+
 export default function CashFlowPage() {
   const money = useMoney();
   return (
     <ReportPage<CashFlowReport>
       path="/reports/cash-flow"
       title="Cash flow"
-      description="Movement through your cash, bank and wallet accounts."
+      description="Where cash came from and where it went, grouped by activity."
       controls={{ range: true }}
       csv={(r) => [
-        ["Account", "Opening", "Inflow", "Outflow", "Closing"],
-        ...r.accounts.map((a) => [`${a.code} ${a.name}`, money.toMajor(a.opening), money.toMajor(a.inflow), money.toMajor(a.outflow), money.toMajor(a.closing)]),
-        ["Total", money.toMajor(r.totalOpening), money.toMajor(r.totalInflow), money.toMajor(r.totalOutflow), money.toMajor(r.totalClosing)],
+        ["Activity", "Account", "Amount"],
+        ...(Object.keys(ACTIVITY_LABELS) as (keyof typeof ACTIVITY_LABELS)[]).flatMap((k) => [
+          ...r.activities[k].items.map((i) => [ACTIVITY_LABELS[k], `${i.code} ${i.name}`, money.toMajor(i.amount)]),
+          [ACTIVITY_LABELS[k], "Net", money.toMajor(r.activities[k].total)],
+        ]),
+        ["", "Net change in cash", money.toMajor(r.netChange)],
+        ["", "Opening cash", money.toMajor(r.totalOpening)],
+        ["", "Closing cash", money.toMajor(r.totalClosing)],
       ]}
     >
       {(r) => (
         <div className="grid gap-6">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Opening" value={money.format(r.totalOpening)} icon={Landmark} tone="neutral" />
-            <StatCard label="Money in" value={money.format(r.totalInflow)} icon={ArrowDownLeft} tone="success" />
-            <StatCard label="Money out" value={money.format(r.totalOutflow)} icon={ArrowUpRight} tone="danger" />
-            <StatCard variant="feature" label="Closing" value={money.format(r.totalClosing)} icon={Banknote} sublabel={`net ${money.format(r.totalInflow - r.totalOutflow, { signed: true })}`} />
+            <StatCard label="Opening cash" value={money.format(r.totalOpening)} icon={Landmark} tone="neutral" />
+            <StatCard label="Cash in" value={money.format(r.totalInflow)} icon={ArrowDownLeft} tone="success" />
+            <StatCard label="Cash out" value={money.format(r.totalOutflow)} icon={ArrowUpRight} tone="danger" />
+            <StatCard
+              variant="feature"
+              label="Closing cash"
+              value={money.format(r.totalClosing)}
+              icon={Banknote}
+              sublabel={`net ${money.format(r.netChange, { signed: true })}`}
+            />
           </div>
-          <SectionCard flush>
+
+          <SectionCard title="By activity" flush>
+            <Table>
+              <TableBody>
+                {(Object.keys(ACTIVITY_LABELS) as (keyof typeof ACTIVITY_LABELS)[]).map((key) => (
+                  <ActivityRows key={key} title={ACTIVITY_LABELS[key]} section={r.activities[key]} />
+                ))}
+                <TableRow className="rule-double-top bg-muted/40 hover:bg-muted/40">
+                  <TableCell className="font-semibold">Net change in cash</TableCell>
+                  <TableCell numeric className="font-display text-lg font-semibold">
+                    <Money value={r.netChange} tone="signed" />
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+              <TableFooter>
+                <TableRow className="hover:bg-transparent">
+                  <TableCell>Opening cash</TableCell>
+                  <TableCell numeric><Money value={r.totalOpening} /></TableCell>
+                </TableRow>
+                <TableRow className="hover:bg-transparent">
+                  <TableCell className="font-semibold">Closing cash</TableCell>
+                  <TableCell numeric className="font-semibold"><Money value={r.totalClosing} /></TableCell>
+                </TableRow>
+              </TableFooter>
+            </Table>
+          </SectionCard>
+
+          <SectionCard title="By cash account" flush>
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -58,19 +102,38 @@ export default function CashFlowPage() {
                   </TableRow>
                 ))}
               </TableBody>
-              <TableFooter>
-                <TableRow className="hover:bg-transparent">
-                  <TableCell>Total</TableCell>
-                  <TableCell numeric><Money value={r.totalOpening} /></TableCell>
-                  <TableCell numeric><Money value={r.totalInflow} /></TableCell>
-                  <TableCell numeric><Money value={r.totalOutflow} /></TableCell>
-                  <TableCell numeric><Money value={r.totalClosing} /></TableCell>
-                </TableRow>
-              </TableFooter>
             </Table>
           </SectionCard>
         </div>
       )}
     </ReportPage>
+  );
+}
+
+function ActivityRows({ title, section }: { title: string; section: CashFlowSection }) {
+  return (
+    <>
+      <TableRow className="hover:bg-transparent">
+        <TableCell colSpan={2} className="label-caps pt-5 pb-1 h-auto">{title}</TableCell>
+      </TableRow>
+      {section.items.length === 0 && (
+        <TableRow className="hover:bg-transparent">
+          <TableCell colSpan={2} className="pl-10 text-muted-foreground">No movements</TableCell>
+        </TableRow>
+      )}
+      {section.items.map((i: CashFlowLine) => (
+        <TableRow key={i.accountId} className="hover:bg-transparent">
+          <TableCell className="pl-10">
+            <span className="mr-2 font-mono text-[12px] text-muted-foreground">{i.code}</span>
+            {i.name}
+          </TableCell>
+          <TableCell numeric><Money value={i.amount} tone="signed" /></TableCell>
+        </TableRow>
+      ))}
+      <TableRow className="bg-muted/30 hover:bg-muted/30">
+        <TableCell className="font-semibold">Net {title.toLowerCase().replace(" activities", "")} cash</TableCell>
+        <TableCell numeric className="font-semibold"><Money value={section.total} tone="signed" /></TableCell>
+      </TableRow>
+    </>
   );
 }

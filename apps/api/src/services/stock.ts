@@ -1,10 +1,11 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { roundHalfAway, roundQty, type StockMovementType } from "@shopbooks/shared";
-import { products, stockLevels, stockMovements, units, variants } from "../db/schema";
+import { roundHalfAway, roundQty, type PromotionTerms, type StockMovementType } from "@shopbooks/shared";
+import { products, stockLevels, stockLots, stockMovements, units, variants } from "../db/schema";
 import { insertMany, type Stmt } from "../lib/batch";
 import type { Ctx } from "../lib/context";
 import { badRequest } from "../lib/errors";
 import { newId } from "../lib/ids";
+import { promotionsFor } from "./promotions";
 import type { Tx } from "./tx";
 
 export interface VariantInfo {
@@ -25,6 +26,8 @@ export interface VariantInfo {
   taxRateId: string | null;
   categoryId: string | null;
   allowDecimal: boolean;
+  /** Offer running today for this variant (null = sold at the tier price). */
+  promotion: PromotionTerms | null;
 }
 
 export function displayName(productName: string, variantName: string) {
@@ -67,10 +70,13 @@ export async function loadVariants(ctx: Ctx, ids: string[]): Promise<Map<string,
         trackInventory: r.trackInventory && r.type !== "service",
         allowDecimal: !!r.allowDecimal,
         displayName: displayName(r.productName, r.variantName),
+        promotion: null,
       });
     }
   }
   for (const id of unique) if (!map.has(id)) throw badRequest("One of the items no longer exists");
+  const promos = await promotionsFor(ctx, [...map.values()].map((v) => ({ variantId: v.id, productId: v.productId })));
+  for (const v of map.values()) v.promotion = promos.get(v.id) ?? null;
   return map;
 }
 
@@ -103,12 +109,37 @@ export async function stockTotals(ctx: Ctx, variantIds: string[]): Promise<Map<s
   return map;
 }
 
+/** Quantity of one expiry date within a location's stock. `expiry` is YYYY-MM-DD, or "" for none. Signed. */
+export interface LotQty {
+  expiry: string;
+  quantity: number;
+}
+
+/** Expiry order: earliest date first, stock without a date last (first expired, first out). */
+function compareLots(a: LotQty, b: LotQty): number {
+  if (a.expiry === b.expiry) return 0;
+  if (!a.expiry) return 1;
+  if (!b.expiry) return -1;
+  return a.expiry < b.expiry ? -1 : 1;
+}
+
+/** The earliest expired date among lots being taken out (null when none has expired). */
+export function expiredLotDate(lots: LotQty[], today: string): string | null {
+  const expired = lots.filter((l) => l.quantity < 0 && l.expiry && l.expiry < today).map((l) => l.expiry);
+  return expired.length ? expired.sort()[0]! : null;
+}
+
 export interface StockChange {
   variantId: string;
   productId: string;
   locationId: string;
   /** signed */
   quantity: number;
+  /**
+   * Expiry breakdown of `quantity`, signed like it. Omit for stock with no expiry date (plain quantity).
+   * Outflows take their lots from StockCoster.outLots; inflows state the expiry of what arrived.
+   */
+  lots?: LotQty[];
   /** Ledger amount in minor units, signed like the quantity (positive = value in). */
   value: number;
   type: StockMovementType;
@@ -148,6 +179,33 @@ export function queueStockChanges(ctx: Ctx, tx: Tx, changes: StockChange[]) {
             quantity: sql`round(${stockLevels.quantity} + excluded.quantity, 3)`,
             value: sql`${stockLevels.value} + excluded.value`,
           },
+        }) as unknown as Stmt,
+    );
+  }
+
+  // Expiry lots, aggregated per (variant, location, expiry) and upserted with the levels.
+  const lotAgg = new Map<string, { variantId: string; locationId: string; expiryDate: string; quantity: number }>();
+  for (const c of relevant) {
+    for (const lot of c.lots ?? [{ expiry: "", quantity: c.quantity }]) {
+      if (roundQty(lot.quantity) === 0) continue;
+      const key = `${c.variantId}|${c.locationId}|${lot.expiry}`;
+      const cur = lotAgg.get(key) ?? { variantId: c.variantId, locationId: c.locationId, expiryDate: lot.expiry, quantity: 0 };
+      cur.quantity = roundQty(cur.quantity + lot.quantity);
+      lotAgg.set(key, cur);
+    }
+  }
+  const lotRows = [...lotAgg.values()]
+    .filter((r) => r.quantity !== 0)
+    .map((r) => ({ businessId: ctx.businessId, ...r }));
+  // Six bound parameters per row: 16 rows stay under D1's 100-parameter limit.
+  for (let i = 0; i < lotRows.length; i += 16) {
+    tx.add(
+      ctx.db
+        .insert(stockLots)
+        .values(lotRows.slice(i, i + 16))
+        .onConflictDoUpdate({
+          target: [stockLots.variantId, stockLots.locationId, stockLots.expiryDate],
+          set: { quantity: sql`round(${stockLots.quantity} + excluded.quantity, 3)` },
         }) as unknown as Stmt,
     );
   }
@@ -216,16 +274,33 @@ interface LevelState {
 export class StockCoster {
   private readonly levels = new Map<string, Map<string, LevelState>>();
   private readonly touched = new Set<string>();
+  /** Expiry lots per `variantId|locationId`, earliest expiry first. */
+  private readonly lots = new Map<string, LotQty[]>();
 
   constructor(
     rows: { variantId: string; locationId: string; quantity: number; value: number }[],
     private readonly costPrices: Map<string, number>,
+    lotRows: { variantId: string; locationId: string; expiryDate: string; quantity: number }[] = [],
   ) {
     for (const r of rows) {
       const lv = this.level(r.variantId, r.locationId);
       lv.quantity = r.quantity;
       lv.value = r.value;
     }
+    for (const r of lotRows) {
+      if (r.quantity > 0) this.lotList(r.variantId, r.locationId).push({ expiry: r.expiryDate, quantity: r.quantity });
+    }
+    for (const list of this.lots.values()) list.sort(compareLots);
+  }
+
+  private lotList(variantId: string, locationId: string): LotQty[] {
+    const key = `${variantId}|${locationId}`;
+    let list = this.lots.get(key);
+    if (!list) {
+      list = [];
+      this.lots.set(key, list);
+    }
+    return list;
   }
 
   private level(variantId: string, locationId: string): LevelState {
@@ -249,6 +324,15 @@ export class StockCoster {
 
   /** Ledger amount (positive) for taking `qty` out of a location. Updates the in-memory level. */
   out(variantId: string, locationId: string, qty: number): number {
+    return this.outLots(variantId, locationId, qty).amount;
+  }
+
+  /**
+   * Takes `qty` out of a location: the ledger amount, and which expiry lots it came from (earliest expiry first).
+   * Quantity beyond the known lots (negative stock) is taken from stock with no expiry date.
+   * The lots are signed negative, ready for StockChange.lots.
+   */
+  outLots(variantId: string, locationId: string, qty: number): { amount: number; lots: LotQty[] } {
     const lv = this.level(variantId, locationId);
     const unit = this.costPrices.get(variantId) ?? 0;
     let amount: number;
@@ -258,15 +342,40 @@ export class StockCoster {
     lv.quantity = roundQty(lv.quantity - qty);
     lv.value -= amount;
     this.touched.add(variantId);
-    return amount;
+
+    const taken: LotQty[] = [];
+    let remaining = roundQty(qty);
+    for (const lot of this.lotList(variantId, locationId)) {
+      if (remaining <= 0) break;
+      const take = roundQty(Math.min(lot.quantity, remaining));
+      if (take <= 0) continue;
+      lot.quantity = roundQty(lot.quantity - take);
+      remaining = roundQty(remaining - take);
+      taken.push({ expiry: lot.expiry, quantity: -take });
+    }
+    const list = this.lotList(variantId, locationId);
+    list.splice(0, list.length, ...list.filter((l) => l.quantity > 0));
+    if (remaining > 0) taken.push({ expiry: "", quantity: -remaining });
+    return { amount, lots: taken };
   }
 
-  /** Adds `qty` to a location at ledger amount `amount`. Updates the in-memory level. */
-  in(variantId: string, locationId: string, qty: number, amount: number) {
+  /**
+   * Adds `qty` to a location at ledger amount `amount`. `lots` says which expiry dates arrived
+   * (default: no expiry date). Updates the in-memory level and lots.
+   */
+  in(variantId: string, locationId: string, qty: number, amount: number, lots?: LotQty[]) {
     const lv = this.level(variantId, locationId);
     lv.quantity = roundQty(lv.quantity + qty);
     lv.value += amount;
     this.touched.add(variantId);
+    for (const arrived of lots ?? [{ expiry: "", quantity: qty }]) {
+      if (roundQty(arrived.quantity) <= 0) continue;
+      const list = this.lotList(variantId, locationId);
+      const lot = list.find((l) => l.expiry === arrived.expiry);
+      if (lot) lot.quantity = roundQty(lot.quantity + arrived.quantity);
+      else list.push({ expiry: arrived.expiry, quantity: roundQty(arrived.quantity) });
+    }
+    this.lotList(variantId, locationId).sort(compareLots);
   }
 
   /** Average-cost changes for the variants that moved, from their post-operation totals. */
@@ -291,7 +400,18 @@ export class StockCoster {
 export async function loadStockCoster(ctx: Ctx, variantIds: string[], costPrices: Map<string, number>): Promise<StockCoster> {
   const unique = [...new Set(variantIds)];
   const rows: { variantId: string; locationId: string; quantity: number; value: number }[] = [];
+  const lotRows: { variantId: string; locationId: string; expiryDate: string; quantity: number }[] = [];
   for (let i = 0; i < unique.length; i += 90) {
+    const foundLots = await ctx.db
+      .select({
+        variantId: stockLots.variantId,
+        locationId: stockLots.locationId,
+        expiryDate: stockLots.expiryDate,
+        quantity: stockLots.quantity,
+      })
+      .from(stockLots)
+      .where(and(eq(stockLots.businessId, ctx.businessId), inArray(stockLots.variantId, unique.slice(i, i + 90))));
+    lotRows.push(...foundLots);
     const found = await ctx.db
       .select({
         variantId: stockLevels.variantId,
@@ -303,7 +423,7 @@ export async function loadStockCoster(ctx: Ctx, variantIds: string[], costPrices
       .where(and(eq(stockLevels.businessId, ctx.businessId), inArray(stockLevels.variantId, unique.slice(i, i + 90))));
     rows.push(...found);
   }
-  return new StockCoster(rows, costPrices);
+  return new StockCoster(rows, costPrices, lotRows);
 }
 
 export function queueCostUpdate(ctx: Ctx, tx: Tx, variantId: string, costPrice: number) {

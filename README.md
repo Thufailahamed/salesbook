@@ -41,9 +41,11 @@ invoices, pay out credit, statements, loyalty points, birthdays, price tier.
 
 **Products & inventory** — categories, brands, units (incl. decimal units like metres/kg), variants
 with option matrix, SKU/barcode (auto-SKU), cost/selling/MRP/wholesale prices, reorder levels, images,
-services (non-stock items), multi-location stock, opening stock, adjustments (count, damage, theft,
-expiry, internal use…), transfers between branches, full movement history, barcode label printing,
-weighted-average costing.
+services (non-stock items), CSV import of many products, multi-location stock, opening stock, adjustments
+(count, damage, theft, expired, internal use…), transfers between branches, full movement history, barcode
+label printing, weighted-average costing, **expiry dates per purchase batch with first-expired-first-out
+selling** (expired stock is blocked until written off), **scheduled promotions** (percent or special price,
+with start and end dates), dead & slow stock and expiry reports.
 
 **Purchasing** — purchase orders → goods received, freight/landed cost capitalised into stock, supplier
 invoices on credit with payment terms, partial payments, supplier advances & credits, purchase returns

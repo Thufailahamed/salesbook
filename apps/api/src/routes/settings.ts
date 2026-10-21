@@ -28,6 +28,7 @@ import { badRequest, conflict, notFound } from "../lib/errors";
 import { clean } from "../lib/http";
 import { newId } from "../lib/ids";
 import { vJson } from "../lib/validate";
+import { assertWithinPlan } from "../services/billing";
 import { listPaymentMethods, mapBusiness, mapLocation, mapTaxRate } from "../services/me";
 
 const app = new Hono<AppEnv>();
@@ -91,6 +92,7 @@ async function clearOtherDefaults(c: { get: (k: "ctx") => AppEnv["Variables"]["c
 
 app.post("/locations", manage, vJson(locationSchema), async (c) => {
   const ctx = c.get("ctx");
+  await assertWithinPlan(ctx, "locations");
   const input = clean(c.req.valid("json"));
   const id = newId();
   const [row] = await ctx.db

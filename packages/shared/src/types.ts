@@ -1,3 +1,4 @@
+import type { PromotionKind, PromotionTerms } from "./promotions";
 import type {
   AccountSubtype,
   AccountType,
@@ -83,6 +84,8 @@ export interface Business {
   loyaltyMinRedeem: number;
   returnWindowDays: number;
   creditDueDays: number;
+  /** Entries dated on or before this day are locked */
+  booksClosedThrough: string | null;
   createdAt: number;
 }
 
@@ -101,6 +104,7 @@ export interface MeResponse {
   taxRates: TaxRate[];
   paymentMethods: PaymentMethod[];
   permissions: Permission[];
+  subscription?: SubscriptionInfo;
 }
 
 export interface AuthResponse extends MeResponse {
@@ -261,6 +265,8 @@ export interface ProductListItem {
 /** A sellable variant, flattened for the POS / purchase line pickers. */
 export interface SellableItem {
   variantId: string;
+  /** Active promotion for this item today (null = none). */
+  promotion: PromotionTerms | null;
   productId: string;
   productName: string;
   variantName: string;
@@ -722,6 +728,8 @@ export interface PurchaseLine {
   total: number;
   /** (net + allocated shipping) / quantity */
   landedUnitCost: number;
+  /** Expiry date of the goods received on this line (YYYY-MM-DD), null if not recorded. */
+  expiryDate: string | null;
   quantityReturned: number;
 }
 
@@ -977,9 +985,21 @@ export interface AccountAmount {
   amount: number;
 }
 
+export interface ProfitLossSummary {
+  from: string;
+  to: string;
+  netRevenue: number;
+  totalCostOfSales: number;
+  grossProfit: number;
+  totalExpenses: number;
+  netProfit: number;
+}
+
 export interface ProfitLossReport {
   from: string;
   to: string;
+  /** The equal-length period immediately before this one, for comparison */
+  previous: ProfitLossSummary;
   /** Sales revenue (positive) and contra accounts (returns/discounts, negative) */
   income: AccountAmount[];
   netRevenue: number;
@@ -1024,6 +1044,19 @@ export interface TrialBalanceReport {
   totalCredit: number;
 }
 
+export interface CashFlowLine {
+  /** The account on the other side of the cash movement */
+  accountId: string;
+  code: string;
+  name: string;
+  amount: number;
+}
+
+export interface CashFlowSection {
+  items: CashFlowLine[];
+  total: number;
+}
+
 export interface CashFlowReport {
   from: string;
   to: string;
@@ -1032,6 +1065,14 @@ export interface CashFlowReport {
   totalInflow: number;
   totalOutflow: number;
   totalClosing: number;
+  /** Cash movements by activity, classified by the account each one was paid against (direct method) */
+  activities: {
+    operating: CashFlowSection;
+    investing: CashFlowSection;
+    financing: CashFlowSection;
+  };
+  /** Operating + investing + financing; equals totalClosing − totalOpening */
+  netChange: number;
 }
 
 export interface SalesSummaryReport {
@@ -1158,4 +1199,294 @@ export interface AuditLog {
   entityType: string | null;
   entityId: string | null;
   summary: string;
+}
+
+export type PromotionStatus = "active" | "scheduled" | "expired" | "paused";
+
+export interface Promotion {
+  id: string;
+  name: string;
+  productId: string | null;
+  productName: string | null;
+  variantId: string | null;
+  /** Display name of the variant or product this offer applies to */
+  itemName: string;
+  kind: PromotionKind;
+  value: number;
+  startDate: string;
+  endDate: string | null;
+  isActive: boolean;
+  status: PromotionStatus;
+  createdAt: number;
+}
+
+// ---------------------------------------------------------------- stock health (expiry, dead stock)
+
+export interface ExpiryRow {
+  variantId: string;
+  displayName: string;
+  sku: string | null;
+  locationId: string;
+  locationName: string;
+  expiryDate: string;
+  /** Negative once the date has passed */
+  daysLeft: number;
+  quantity: number;
+  /** quantity × average cost */
+  value: number;
+  status: "expired" | "expiring";
+}
+
+export interface ExpiryReport {
+  asOf: string;
+  days: number;
+  rows: ExpiryRow[];
+  expiredCount: number;
+  expiredValue: number;
+  expiringCount: number;
+  expiringValue: number;
+}
+
+export interface DeadStockRow {
+  variantId: string;
+  displayName: string;
+  sku: string | null;
+  categoryName: string | null;
+  quantity: number;
+  /** Stock value at cost */
+  value: number;
+  /** Last completed sale, null if never sold */
+  lastSoldOn: string | null;
+}
+
+export interface DeadStockReport {
+  asOf: string;
+  /** Items with no sale in this many days */
+  days: number;
+  rows: DeadStockRow[];
+  totalQuantity: number;
+  totalValue: number;
+}
+
+// ---------------------------------------------------------------- bank reconciliation
+
+export interface Reconciliation {
+  id: string;
+  accountId: string;
+  statementDate: string;
+  statementBalance: number;
+  lineCount: number;
+  createdAt: number;
+}
+
+/** A journal line on the bank account that is not yet matched to a statement. Amount is signed (debit +, credit -). */
+export interface ReconciliationLine {
+  lineId: string;
+  date: string;
+  entryNumber: string;
+  memo: string;
+  amount: number;
+  /** Matched to an imported bank statement line */
+  matched: boolean;
+}
+
+export interface BankStatementLine {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  matched: boolean;
+}
+
+export interface BankStatementView {
+  accountId: string;
+  rows: BankStatementLine[];
+}
+
+export interface BankMatchResult {
+  matched: number;
+  unmatched: number;
+}
+
+export interface ReconciliationView {
+  account: Account;
+  statementDate: string;
+  /** Sum of every line cleared by earlier reconciliations */
+  clearedBalance: number;
+  /** Uncleared lines dated on or before the statement date */
+  uncleared: ReconciliationLine[];
+  history: Reconciliation[];
+}
+
+// ---------------------------------------------------------------- fixed assets
+
+export interface FixedAsset {
+  id: string;
+  name: string;
+  accountId: string;
+  accountName: string;
+  paidFromAccountId: string;
+  acquiredOn: string;
+  cost: number;
+  salvage: number;
+  usefulLifeMonths: number;
+  accumulated: number;
+  netBookValue: number;
+  depreciatedThrough: string | null;
+  /** Straight-line charge per month */
+  monthlyCharge: number;
+}
+
+export interface FixedAssetRegister {
+  rows: FixedAsset[];
+  totalCost: number;
+  totalAccumulated: number;
+  totalNetBookValue: number;
+}
+
+export interface DepreciationRunResult {
+  throughDate: string;
+  amount: number;
+  assets: number;
+  journalId: string | null;
+}
+
+export interface GatewaySettings {
+  isEnabled: boolean;
+  hasSecretKey: boolean;
+  hasWebhookSecret: boolean;
+  /** "test" for sk_test_ keys, "live" for sk_live_, null when no key. */
+  mode: "test" | "live" | null;
+  methodId: string | null;
+  /** Public URL to paste into the payments.lk dashboard as the webhook endpoint. */
+  webhookUrl: string;
+}
+
+export interface GatewayCheckout {
+  id: string;
+  url: string;
+  amount: number;
+  status: "pending" | "paid" | "failed" | "expired";
+}
+
+// ---------------------------------------------------------------- platform admin & subscriptions
+
+export interface Plan {
+  id: string;
+  name: string;
+  description: string | null;
+  priceCents: number;
+  periodDays: number;
+  maxUsers: number;
+  maxLocations: number;
+  isActive: boolean;
+  sortOrder: number;
+  /** Shops currently on this plan (admin list only) */
+  shopCount?: number;
+}
+
+export interface SubscriptionInfo {
+  /** none = legacy shop without a plan */
+  state: "none" | "active" | "expiring" | "expired" | "suspended";
+  planId: string | null;
+  planName: string | null;
+  endsAt: number | null;
+  daysLeft: number | null;
+}
+
+export interface BillingInfo {
+  subscription: SubscriptionInfo;
+  plans: Plan[];
+  /** Whether renewing online is possible */
+  paymentEnabled: boolean;
+  orders: PlatformOrder[];
+}
+
+export interface PublicPlans {
+  paymentRequired: boolean;
+  plans: Plan[];
+}
+
+export interface PurchaseResult {
+  orderId: string;
+  url: string;
+}
+
+export interface PublicOrderStatus {
+  status: PlatformOrder["status"];
+  kind: PlatformOrder["kind"];
+  failureMessage: string | null;
+}
+
+export interface PlatformAdmin {
+  id: string;
+  name: string;
+  email: string;
+  isActive: boolean;
+  lastLoginAt: number | null;
+  createdAt: number;
+}
+
+export interface PlatformOrder {
+  id: string;
+  kind: "signup" | "renewal";
+  planName: string;
+  businessId: string | null;
+  email: string;
+  shopName: string;
+  amount: number;
+  status: "pending" | "paid" | "failed" | "expired";
+  failureMessage: string | null;
+  createdAt: number;
+  paidAt: number | null;
+}
+
+export interface PlatformSettings {
+  requirePayment: boolean;
+  isEnabled: boolean;
+  hasSecretKey: boolean;
+  hasWebhookSecret: boolean;
+  mode: "test" | "live" | null;
+  webhookUrl: string;
+}
+
+export interface PlatformStats {
+  shops: { total: number; active: number; suspended: number; expired: number; newThisMonth: number };
+  users: number;
+  revenue: { total: number; last30Days: number; orders: number };
+  pendingOrders: number;
+  recentShops: PlatformShop[];
+  recentOrders: PlatformOrder[];
+}
+
+export interface PlatformShop {
+  id: string;
+  name: string;
+  email: string | null;
+  currency: string;
+  status: "active" | "suspended";
+  planId: string | null;
+  planName: string | null;
+  subscriptionEndsAt: number | null;
+  subscription: SubscriptionInfo;
+  userCount: number;
+  createdAt: number;
+}
+
+export interface PlatformShopUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  lastLoginAt: number | null;
+}
+
+export interface PlatformShopDetail extends PlatformShop {
+  phone: string | null;
+  country: string | null;
+  timezone: string;
+  users: PlatformShopUser[];
+  usage: { locations: number; products: number; customers: number; invoices: number; lastInvoiceAt: number | null };
+  orders: PlatformOrder[];
 }
