@@ -23,7 +23,7 @@ import {
   users,
 } from "../db/schema";
 import { hashPassword } from "../lib/crypto";
-import { badRequest, notFound } from "../lib/errors";
+import { badRequest, conflict, notFound } from "../lib/errors";
 import { likeQ, pageParams, paged } from "../lib/http";
 import { newId } from "../lib/ids";
 import { mapOrder, mapPlan, subscriptionInfo } from "./billing";
@@ -217,7 +217,16 @@ export async function listPlans(db: DB) {
   return rows.map((p) => mapPlan(p, by.get(p.id) ?? 0));
 }
 
+/** Two active plans with the same name look identical to shops, so names must be unique among active plans. */
+async function assertUniqueActiveName(db: DB, name: string, exceptId?: string) {
+  const conds = [eq(plans.isActive, true), sql`lower(${plans.name}) = ${name.trim().toLowerCase()}`];
+  if (exceptId) conds.push(ne(plans.id, exceptId));
+  const [dup] = await db.select({ id: plans.id }).from(plans).where(and(...conds)).limit(1);
+  if (dup) throw conflict(`An active plan named "${name.trim()}" already exists`);
+}
+
 export async function createPlan(db: DB, input: PlanInput) {
+  if (input.isActive ?? true) await assertUniqueActiveName(db, input.name);
   const row = { id: newId(), createdAt: Date.now(), name: input.name, description: input.description ?? null, priceCents: input.priceCents, periodDays: input.periodDays, maxUsers: input.maxUsers, maxLocations: input.maxLocations, isActive: input.isActive ?? true, sortOrder: input.sortOrder ?? 0 };
   await db.insert(plans).values(row);
   return mapPlan(row, 0);
@@ -226,6 +235,7 @@ export async function createPlan(db: DB, input: PlanInput) {
 export async function updatePlan(db: DB, id: string, input: PlanInput) {
   const [p] = await db.select().from(plans).where(eq(plans.id, id));
   if (!p) throw notFound("Plan");
+  if (input.isActive ?? p.isActive) await assertUniqueActiveName(db, input.name, id);
   const set = { name: input.name, description: input.description ?? null, priceCents: input.priceCents, periodDays: input.periodDays, maxUsers: input.maxUsers, maxLocations: input.maxLocations, isActive: input.isActive ?? p.isActive, sortOrder: input.sortOrder ?? p.sortOrder };
   await db.update(plans).set(set).where(eq(plans.id, id));
   return mapPlan({ ...p, ...set });

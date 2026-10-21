@@ -7,6 +7,8 @@ import crypto from "node:crypto";
 const BASE = (process.argv[2] ?? "http://localhost:8787").replace(/\/$/, "") + "/api";
 const ADMIN = { email: "admin@shopbooks.test", password: "AdminPass#123" };
 const SECRET = "sk_test_platform", WH = "whsec_platform";
+/** plans this run creates; retired at the end so repeated runs don't pile up active duplicates */
+const createdPlans = [];
 let passed = 0, failed = 0;
 const ok = (c, m) => (c ? (passed++, console.log("  ✓", m)) : (failed++, console.log("  ✗", m)));
 
@@ -53,11 +55,16 @@ try {
   ok((await call("GET", "/platform/auth/me", { token: T })).json.admin.email === ADMIN.email, "auth/me works");
 
   console.log("Plans & settings");
-  const mk = async (b) => (await call("POST", "/platform/plans", { token: T, body: b })).json;
+  const mk = async (b) => {
+    const p = (await call("POST", "/platform/plans", { token: T, body: b })).json;
+    if (p?.id) createdPlans.push(p.id);
+    return p;
+  };
   const basic = await mk({ name: "Basic", description: "1 store", priceCents: 250000, periodDays: 30, maxUsers: 2, maxLocations: 1 });
   ok(basic.id && basic.priceCents === 250000, "create plan");
   const pro = await mk({ name: "Pro", priceCents: 2500000, periodDays: 365, maxUsers: 0, maxLocations: 0 });
   ok(!!pro.id, "create second plan");
+  ok((await call("POST", "/platform/plans", { token: T, body: { name: " pro ", priceCents: 100, periodDays: 30, maxUsers: 0, maxLocations: 0 } })).status === 409, "duplicate active plan name refused");
   ok((await call("PUT", `/platform/plans/${pro.id}`, { token: T, body: { name: "Pro", priceCents: 2400000, periodDays: 365, maxUsers: 0, maxLocations: 0 } })).json.priceCents === 2400000, "update plan");
   let s = await call("PUT", "/platform/settings", { token: T, body: { requirePayment: true, isEnabled: false } });
   ok(s.status === 400, "can't require payment while payments are disabled");
@@ -200,5 +207,13 @@ try {
   const down = await call("POST", "/public/purchase", { body: { planId: (await (await fetch(BASE + "/public/plans")).json()).plans[0].id, signup: { businessName: "Down", name: "D", email: `d+${Date.now()}@shop.test`, password: "password123", currency: "LKR", timezone: "Asia/Colombo" } } });
   ok(down.status === 400 && /reach payments\.lk/.test(down.json.error?.message), "provider outage gives a clear error (not a 500)");
 } catch (e) { failed++; console.log("  ✗", e); }
+// retire the plans this run created
+try {
+  const T = (await call("POST", "/platform/auth/login", { body: ADMIN })).json.token;
+  for (const id of createdPlans) await call("DELETE", `/platform/plans/${id}`, { token: T });
+  const left = (await call("GET", "/public/plans")).json.plans;
+  ok(!left.some((p) => createdPlans.includes(p.id)), "cleanup retires this run's plans");
+  await call("POST", "/platform/auth/logout", { token: T });
+} catch (e) { failed++; console.log("  ✗ cleanup:", e); }
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
