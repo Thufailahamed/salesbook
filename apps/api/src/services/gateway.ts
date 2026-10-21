@@ -81,7 +81,24 @@ export async function createInvoiceCheckout(ctx: Ctx, input: CreateCheckoutInput
   const id = newId();
   const origin = safeOrigin(ctx.env, input.returnOrigin, fallbackOrigin);
   const back = `${origin}/sales/view?id=${inv.id}`;
-    const body = (await res.json().catch(() => null)) as { id?: string; url?: string; error?: { message?: string } } | null;
+  const res = await fetch(`${apiBase(ctx.env)}/checkouts`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${cfg.secretKey}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": `shopbooks-${id}`,
+    },
+    body: JSON.stringify({
+      amountCents: amount,
+      description: `Invoice ${inv.number}`,
+      reference: id,
+      successUrl: `${back}&gateway=success`,
+      cancelUrl: `${back}&gateway=cancelled`,
+    }),
+  }).catch(() => {
+    throw badRequest("Could not reach payments.lk. Please try again in a moment.");
+  });
+  const body = (await res.json().catch(() => null)) as { id?: string; url?: string; error?: { message?: string } } | null;
   if (!res.ok || !body?.url) {
     throw badRequest(`payments.lk: ${body?.error?.message ?? `checkout failed (${res.status})`}`);
   }
@@ -92,10 +109,7 @@ export async function createInvoiceCheckout(ctx: Ctx, input: CreateCheckoutInput
     docId: inv.id,
     amount,
     status: "pending",
-    providerCheckoutId: body.id }).catch(() => {
-    throw badRequest("Could not reach payments.lk. Please try again in a moment.");
-  });
-null,
+    providerCheckoutId: body.id ?? null,
     url: body.url,
     createdBy: ctx.userId,
     createdAt: ctx.now,

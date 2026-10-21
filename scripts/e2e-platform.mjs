@@ -145,6 +145,32 @@ try {
   const after = (await call("GET", "/auth/me", { token: ST2 })).json.subscription;
   ok(after.state === "active" && after.daysLeft >= 29 && after.planName === "Basic", "renewal extends from now by the plan period");
 
+  console.log("Shop's own gateway: pay an invoice online");
+  const loc0 = (await call("GET", "/auth/me", { token: ST2 })).json;
+  const locationId = loc0.locations[0].id;
+  const cardMethod = loc0.paymentMethods.find((m) => m.type === "card");
+  const cust = await call("POST", "/customers", { token: ST2, body: { name: "Credit Cust", allowCredit: true, creditLimit: 0 } });
+  const sale = await call("POST", "/sales/checkout", { token: ST2, body: { locationId, customerId: cust.json.id, lines: [{ name: "Service", quantity: 1, unitPrice: 100000 }], payments: [], allowCredit: true } });
+  const inv = sale.json.invoice;
+  ok(sale.status < 300 && inv.amountDue === 100000, "credit invoice created (due 1,000.00)");
+  ok((await call("GET", "/gateway/status", { token: ST2 })).json.enabled === false, "gateway starts disabled for the shop");
+  ok((await call("POST", "/gateway/checkouts", { token: ST2, body: { invoiceId: inv.id } })).status === 400, "can't create checkout while disabled");
+  const gs = await call("PUT", "/gateway/settings", { token: ST2, body: { isEnabled: true, secretKey: SECRET, webhookSecret: "whsec_shop", methodId: cardMethod.id } });
+  ok(gs.status === 200 && gs.json.webhookUrl.includes(loc0.business.id), "shop saves its own payments.lk keys");
+  const co = await call("POST", "/gateway/checkouts", { token: ST2, body: { invoiceId: inv.id } });
+  ok(co.status === 200 && co.json.url.startsWith("https://pay.mock/"), "invoice checkout created");
+  const shopHook = (type) => { const raw = JSON.stringify({ type, data: { reference: co.json.id } }); return call("POST", `/gateway/webhook/${loc0.business.id}`, { body: raw, headers: { "payments-signature": sign(raw, "whsec_shop") } }); };
+  ok((await shopHook("payment.succeeded")).json.result === "not succeeded yet", "invoice stays unpaid until the API confirms");
+  [...checkouts.values()].at(-1).paid = true;
+  ok((await shopHook("payment.succeeded")).json.result === "settled", "invoice settled by webhook");
+  ok((await shopHook("payment.succeeded")).json.result === "already settled", "invoice webhook idempotent");
+  const paidInv = await call("GET", `/sales/${inv.id}`, { token: ST2 });
+  ok(paidInv.json.amountDue === 0 && paidInv.json.paymentStatus === "paid", "invoice is now paid");
+  const cs = await call("GET", `/customers/${cust.json.id}`, { token: ST2 });
+  ok(cs.json.dueBalance === 0, "customer balance cleared (ledger moved with payment)");
+  const platformSigOnShopHook = JSON.stringify({ type: "payment.succeeded", data: { reference: co.json.id } });
+  ok((await call("POST", `/gateway/webhook/${loc0.business.id}`, { body: platformSigOnShopHook, headers: { "payments-signature": sign(platformSigOnShopHook, WH) } })).status === 400, "another account's signing secret is rejected");
+
   console.log("Failure paths");
   const buy2 = await call("POST", "/public/purchase", { body: { planId: basic.id, signup: { ...signup, email: `b+${Date.now()}@shop.test` } } });
   ok((await webhook("payment.failed", buy2.json.orderId)).json.result === "payment.failed", "failed payment recorded");
@@ -168,6 +194,11 @@ try {
 } catch (e) {
   failed++; console.log("  ✗ crashed:", e);
 }
-mock.close();
+// provider unreachable: stop the mock, then try to buy
+await new Promise((r) => mock.close(r));
+try {
+  const down = await call("POST", "/public/purchase", { body: { planId: (await (await fetch(BASE + "/public/plans")).json()).plans[0].id, signup: { businessName: "Down", name: "D", email: `d+${Date.now()}@shop.test`, password: "password123", currency: "LKR", timezone: "Asia/Colombo" } } });
+  ok(down.status === 400 && /reach payments\.lk/.test(down.json.error?.message), "provider outage gives a clear error (not a 500)");
+} catch (e) { failed++; console.log("  ✗", e); }
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

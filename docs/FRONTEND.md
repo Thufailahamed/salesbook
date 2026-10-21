@@ -268,3 +268,13 @@ tracking) for titles; `.figure` = expanded tabular figures for KPIs/totals; `.ey
 Use `.num` (or `tabular-nums`) for every number column and `label-caps` for tiny uppercase section labels.
 Typical text sizes: body `text-sm` (14px), secondary `text-[13px] text-muted-foreground`, table header 10.5px expanded caps, page title 32px expanded display.
 Dark mode is automatic — use tokens, never raw colours (except inside print documents, which are always light).
+
+## Platform admin portal & billing UI
+
+* `/admin/login` and `/admin/(portal)/*` (overview, shops + `shops/view?id=`, plans, payments, settings) use
+  `components/layout/admin-shell.tsx` (its own guard against `/platform/auth/me`; `api.ts` redirects 401s on
+  `/platform/*` to `/admin/login`). Money there is always LKR via `lib/platform.ts#lkr` (no business session).
+* `/signup` adds a "Plan & pay" step when `/public/plans` says payment is required and sends the buyer to the
+  payments.lk checkout; `/signup/complete?order=` polls until the webhook has created the shop.
+* Shops see **Settings → Subscription** (`components/billing-panel.tsx`) and a renew banner (≤7 days); an expired shop's
+  app shell is replaced by the same panel.

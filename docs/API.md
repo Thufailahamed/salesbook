@@ -260,3 +260,45 @@ On `payment.succeeded` the webhook re-fetches the checkout from payments.lk (`GE
 and amount, then records a normal invoice payment through `addInvoicePayment` (so the journal, receipt number and
 sub-ledgers are posted exactly as for a manual receipt) using the configured payment method. `payment.failed` /
 `checkout.expired` mark the checkout failed/expired. Settled checkouts are idempotent. Amounts are LKR cents.
+
+## Platform admin, plans & subscriptions
+
+A separate **platform admin** identity (table `platform_admins`, cookie `sb_admin_session`, Bearer also accepted) manages
+every shop. Bootstrap the first admin by setting the secrets `PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD`
+(`wrangler secret put …`; locally in `apps/api/.dev.vars`, quote values containing `#`): the first successful login with
+them creates the admin. Shop tokens never work on `/platform/*` and vice versa.
+
+`/api/platform/*` (all except `auth/login|logout` require an admin):
+
+| Path | Notes |
+|---|---|
+| `POST auth/login`, `POST auth/logout`, `GET auth/me` | |
+| `GET stats` | shop counts (active/expired/suspended), users, revenue, recent shops/payments |
+| `GET shops?q&status=active\|expired\|suspended`, `GET shops/:id` | detail has users, usage counters, plan orders |
+| `PATCH shops/:id` | `status`, `planId`, `subscriptionEndsOn` (YYYY-MM-DD / null), `extendDays`. Suspending revokes the shop's sessions |
+| `PATCH users/:id` | `isActive`, `password` (reset). Revokes that user's sessions |
+| `GET/POST plans`, `PUT/DELETE plans/:id` | price in LKR cents, `periodDays`, `maxUsers`/`maxLocations` (0 = unlimited). Plans in use are deactivated, not deleted |
+| `GET orders?q&status` | plan purchases / renewals |
+| `GET/PUT settings` | the platform's own payments.lk keys + `requirePayment` (secrets write-only) |
+| `GET/POST admins`, `PATCH admins/:id` | |
+
+**Selling the system.** `GET /public/plans` → `{ paymentRequired, plans }`. When `requirePayment` is on,
+`POST /auth/signup` returns 402 and shops are created only by purchase:
+
+1. `POST /public/purchase { planId, signup }` stores the sign-up (password hashed) in `platform_orders` and opens a
+   payments.lk checkout (`reference` = order id) → `{ orderId, url }`; redirect the browser to `url`.
+2. payments.lk calls `POST /public/webhook` (signature `Payments-Signature`, same scheme as the shop gateway). On
+   `payment.succeeded` the order is re-verified with `GET /v1/checkouts/:id` (status + amount), then `createBusiness()`
+   runs and the shop gets `planId` + `subscriptionEndsAt = now + periodDays`. Idempotent per order.
+3. `GET /public/orders/:id` → `{ status }` is polled by `/signup/complete` until the order is `paid`.
+
+**Subscriptions.** `businesses.status` (`active|suspended`), `planId`, `subscriptionEndsAt` (null = never expires, used
+by shops that predate plans). `requireAuth` returns 403 `shop_suspended` for suspended shops, and 402
+`subscription_expired` for expired ones on everything except `/auth/*` and `/billing`. `GET /auth/me` carries
+`subscription` (`state`: none/active/expiring(≤7d)/expired/suspended). `GET /billing` and `POST /billing/renew { planId }`
+(permission `settings.manage`) let a shop renew; renewals stack on remaining time and never lift an admin suspension.
+Plan limits (`maxUsers`, `maxLocations`) are enforced on user/location creation.
+
+`PAYMENTS_LK_API` (optional env) overrides `https://api.payments.lk/v1` — `scripts/e2e-platform.mjs` points it at a
+local mock. Run it with the API started using the `.dev.vars` shown in the script header; it checks admin auth, plan CRUD,
+paid signup, webhook security/idempotency, plan limits, suspension, expiry + renewal, and the per-shop invoice gateway.

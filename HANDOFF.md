@@ -36,3 +36,11 @@
 - No automated UI tests (only the API e2e script)
 - Barcode labels target A4 sheets; no thermal label-printer layout
 - Held sales/POS cart persist per user+location in localStorage
+
+## Platform admin & paid signup (added)
+- Super-admin portal at `/admin` (shops, plans, payments, settings, admins); selling plans via payments.lk; subscription
+  enforcement (expiry/suspension/plan limits). Contract + flow: `docs/API.md` → "Platform admin, plans & subscriptions".
+- Before go-live: `wrangler secret put PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD`, run `db:migrate:remote`, sign in at
+  `/admin/login`, create plans, paste live payments.lk keys + webhook secret in Admin → Settings, then enable "Require payment".
+- Verified with `scripts/e2e-platform.mjs` (64 checks, mock payments.lk). **Not** yet tested against the real payments.lk
+  sandbox — webhook payload shape is only partly documented, so the webhook re-fetches the checkout to confirm.
