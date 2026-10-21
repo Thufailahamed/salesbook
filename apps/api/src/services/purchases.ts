@@ -32,7 +32,7 @@ import {
 import { getPurchaseDto, getPurchaseReturnDto } from "./purchases-read";
 import { getLocation, taxRateMap } from "./sales";
 import { reserveNumbers } from "./sequences";
-import { loadStockCoster, loadVariants, queueCostUpdate, queueStockChanges, stockAt } from "./stock";
+import { loadStockCoster, loadVariants, queueCostUpdate, queueStockChanges, stockAt, type LotQty } from "./stock";
 import { Tx } from "./tx";
 
 type PurchaseRow = typeof purchases.$inferSelect;
@@ -55,6 +55,8 @@ interface BuiltLine {
   total: number;
   /** net + allocated freight */
   landedValue: number;
+  /** Expiry date of the goods on this line, if recorded. */
+  expiryDate: string | null;
   landedUnitCost: number;
 }
 
@@ -78,8 +80,12 @@ async function buildDocument(ctx: Ctx, input: PurchaseInput) {
     const v = info.get(l.variantId)!;
     if (!v.trackInventory) throw badRequest(`${v.displayName} doesn't track inventory and can't be purchased into stock`);
     if (!v.allowDecimal && !Number.isInteger(l.quantity)) throw badRequest(`${v.displayName} only allows whole units`);
+    if (l.expiryDate && l.expiryDate < ctx.today) {
+      throw badRequest(`${v.displayName} is already past its expiry date (${l.expiryDate}). Don't receive it.`);
+    }
     return {
       v,
+      expiryDate: l.expiryDate ?? null,
       quantity: roundQty(l.quantity),
       unitCost: l.unitCost,
       discountType: l.discountType ?? null,
@@ -127,6 +133,7 @@ async function buildDocument(ctx: Ctx, input: PurchaseInput) {
       total: c.total,
       landedValue,
       landedUnitCost: r.quantity > 0 ? roundHalfAway(landedValue / r.quantity) : 0,
+      expiryDate: r.expiryDate,
     };
   });
   return { calc, lines, info };
@@ -155,6 +162,7 @@ function lineRows(ctx: Ctx, purchaseId: string, lines: BuiltLine[]) {
       tax: l.tax,
       total: l.total,
       landedUnitCost: l.landedUnitCost,
+      expiryDate: l.expiryDate,
       sortOrder: i,
     })),
   );
@@ -180,6 +188,7 @@ function fromStoredLines(rows: PurchaseLineRow[], shipping: number): BuiltLine[]
     total: r.total,
     landedValue: r.net + (freight[i] ?? 0),
     landedUnitCost: r.landedUnitCost,
+    expiryDate: r.expiryDate,
   }));
 }
 
@@ -197,6 +206,11 @@ interface ReceiveArgs {
   payments: { methodId: string; amount: number; reference?: string | null }[];
   applySupplierCredit: boolean;
   updateCostPrice: boolean;
+}
+
+/** The expiry date a received line brings in (none recorded = no expiry). */
+function receivedLots(l: { quantity: number; expiryDate: string | null }): LotQty[] {
+  return [{ expiry: l.expiryDate ?? "", quantity: l.quantity }];
 }
 
 /** Stock in, weighted-average cost, AP journal, immediate payments. Returns the settlement figures. */
@@ -218,7 +232,7 @@ async function queueReceive(ctx: Ctx, tx: Tx, a: ReceiveArgs) {
   const variantIds = [...new Set(a.lines.map((l) => l.variantId))];
   const info = await loadVariants(ctx, variantIds);
   const coster = await loadStockCoster(ctx, variantIds, new Map([...info].map(([id, v]) => [id, v.costPrice])));
-  for (const l of a.lines) coster.in(l.variantId, a.locationId, l.quantity, l.landedValue);
+  for (const l of a.lines) coster.in(l.variantId, a.locationId, l.quantity, l.landedValue, receivedLots(l));
   if (a.updateCostPrice) for (const u of coster.costUpdates()) queueCostUpdate(ctx, tx, u.variantId, u.costPrice);
 
   queueStockChanges(
@@ -230,6 +244,7 @@ async function queueReceive(ctx: Ctx, tx: Tx, a: ReceiveArgs) {
       locationId: a.locationId,
       quantity: l.quantity,
       value: l.landedValue,
+      lots: receivedLots(l),
       type: "purchase" as const,
       referenceType: "purchase",
       referenceId: a.purchaseId,
@@ -617,8 +632,8 @@ export async function createPurchaseReturn(ctx: Ctx, input: PurchaseReturnInput)
   const variantIds = [...new Set(lines.map((l) => l.pl.variantId))];
   const info = await loadVariants(ctx, variantIds);
   const coster = await loadStockCoster(ctx, variantIds, new Map([...info].map(([id, v]) => [id, v.costPrice])));
-  const outs = lines.map((l) => coster.out(l.pl.variantId, p.locationId, l.qty));
-  const inventoryOut = outs.reduce((s, c) => s + c, 0);
+  const outs = lines.map((l) => coster.outLots(l.pl.variantId, p.locationId, l.qty));
+  const inventoryOut = outs.reduce((s, c) => s + c.amount, 0);
   const appliedToBill = Math.min(total, p.amountDue);
   const remainder = total - appliedToBill;
   const refundMethod = input.settlement === "refund" && remainder > 0 ? await requireMethod(ctx, input.methodId) : null;
@@ -699,7 +714,8 @@ export async function createPurchaseReturn(ctx: Ctx, input: PurchaseReturnInput)
       productId: l.pl.productId,
       locationId: p.locationId,
       quantity: -l.qty,
-      value: -outs[i]!,
+      value: -outs[i]!.amount,
+      lots: outs[i]!.lots,
       type: "purchase_return" as const,
       referenceType: "purchase_return",
       referenceId: id,

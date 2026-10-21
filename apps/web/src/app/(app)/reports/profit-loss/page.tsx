@@ -59,16 +59,34 @@ export default function ProfitLossPage() {
       {(r) => (
         <div className="grid gap-6">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Net revenue" value={money.format(r.netRevenue)} tone="primary" />
-            <StatCard label="Gross profit" value={money.format(r.grossProfit)} tone="success" sublabel={`${formatPercent(r.grossMargin)} margin`} />
-            <StatCard label="Expenses" value={money.format(r.totalExpenses)} tone="warning" />
+            <StatCard
+              label="Net revenue"
+              value={money.format(r.netRevenue)}
+              tone="primary"
+              sublabel={vsPrevious(r.netRevenue, r.previous.netRevenue, money.format)}
+            />
+            <StatCard
+              label="Gross profit"
+              value={money.format(r.grossProfit)}
+              tone="success"
+              sublabel={`${formatPercent(r.grossMargin)} margin · ${vsPrevious(r.grossProfit, r.previous.grossProfit, money.format)}`}
+            />
+            <StatCard
+              label="Expenses"
+              value={money.format(r.totalExpenses)}
+              tone="warning"
+              sublabel={vsPrevious(r.totalExpenses, r.previous.totalExpenses, money.format)}
+            />
             <StatCard
               variant="feature"
               label="Net profit"
               value={money.format(r.netProfit)}
-              sublabel={`${formatPercent(r.netMargin)} margin`}
+              sublabel={`${formatPercent(r.netMargin)} margin · ${vsPrevious(r.netProfit, r.previous.netProfit, money.format)}`}
             />
           </div>
+          <p className="-mt-2 text-xs text-muted-foreground">
+            Compared with {r.previous.from} to {r.previous.to}, the equal-length period before this one.
+          </p>
           <SectionCard flush>
             <Table>
               <TableBody>
@@ -97,6 +115,13 @@ export default function ProfitLossPage() {
       )}
     </ReportPage>
   );
+}
+
+/** "vs prior Rs X · +12.5%" for the comparison line under each KPI. */
+function vsPrevious(now: number, prev: number, format: (v: number) => string) {
+  const change = prev === 0 ? null : ((now - prev) / Math.abs(prev)) * 100;
+  const delta = change === null ? (now === 0 ? "no change" : "new") : `${change >= 0 ? "+" : ""}${formatPercent(change)}`;
+  return `vs ${format(prev)} · ${delta}`;
 }
 
 function Section({ title }: { title: string }) {

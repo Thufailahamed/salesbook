@@ -8,7 +8,7 @@ import { businesses, sessions, users } from "../db/schema";
 import type { AppEnv } from "../env";
 import { createCtx } from "./context";
 import { newToken, sha256 } from "./crypto";
-import { forbidden, unauthorized } from "./errors";
+import { ApiError, forbidden, unauthorized } from "./errors";
 
 export const SESSION_COOKIE = "sb_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -75,6 +75,16 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   const now = Date.now();
   if (!row || row.session.expiresAt < now) throw unauthorized("Your session has expired, please sign in again");
   if (!row.user.isActive) throw unauthorized("Your account has been deactivated");
+
+  // Subscription gate: suspended shops are locked out; expired ones may only reach auth + billing.
+  const path = c.req.path;
+  if (row.business.status === "suspended" && !path.endsWith("/auth/logout")) {
+    throw new ApiError(403, "shop_suspended", "This shop has been suspended. Contact support.");
+  }
+  const ends = row.business.subscriptionEndsAt;
+  if (ends != null && ends < now && !path.includes("/auth/") && !path.includes("/billing")) {
+    throw new ApiError(402, "subscription_expired", "Your subscription has expired. Renew to continue.");
+  }
 
   // Sliding expiry: extend sessions that are past half their life.
   if (row.session.expiresAt - now < SESSION_TTL_MS / 2) {

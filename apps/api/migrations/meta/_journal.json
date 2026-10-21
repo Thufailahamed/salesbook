@@ -22,6 +22,48 @@
       "when": 1792525763657,
       "tag": "0002_sale_return_cost",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792597655297,
+      "tag": "0003_mean_snowbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792597933239,
+      "tag": "0004_whole_charles_xavier",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792598775878,
+      "tag": "0005_fluffy_firebrand",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792599431435,
+      "tag": "0006_clear_rictor",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792601488226,
+      "tag": "0007_mean_silvermane",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792601965753,
+      "tag": "0008_dry_hannibal_king",
+      "breakpoints": true
     }
   ]
 }

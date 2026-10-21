@@ -3,8 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Ban, FileText, HandCoins, MoreHorizontal, Printer, Receipt, Undo2 } from "lucide-react";
-import type { Customer, Invoice, InvoicePaymentInput, TenderInput } from "@shopbooks/shared";
+import { Ban, CreditCard, FileText, HandCoins, MoreHorizontal, Printer, Receipt, Undo2 } from "lucide-react";
+import type { Customer, GatewayCheckout, Invoice, InvoicePaymentInput, TenderInput } from "@shopbooks/shared";
 import { TENDER_LABELS } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { DetailSkeleton, ErrorState } from "@/components/loading";
@@ -36,6 +36,7 @@ import { useApiMutation, useApiQuery } from "@/hooks/use-api";
 import { useMoney } from "@/hooks/use-money";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 import { formatDate, formatDateTime, formatQty } from "@/lib/utils";
 
 export default function Page() {
@@ -55,6 +56,21 @@ function InvoiceView() {
   const { can, business } = useSession();
   const { data: inv, isLoading, error, refetch } = useApiQuery<Invoice>(id ? `/sales/${id}` : null);
   const [payOpen, setPayOpen] = React.useState(false);
+  const gw = useApiQuery<{ enabled: boolean }>("/gateway/status");
+  const checkout = useApiMutation(
+    () => api.post<GatewayCheckout>("/gateway/checkouts", { invoiceId: id, returnOrigin: window.location.origin }),
+    { onSuccess: (c) => { window.location.href = c.url; } },
+  );
+  // Back from payments.lk: the webhook settles the invoice, which can lag the redirect by a moment.
+  const gatewayResult = useSearchParams().get("gateway");
+  React.useEffect(() => {
+    if (gatewayResult === "success") {
+      toast.success("Payment submitted — updating the invoice…");
+      const timers = [2000, 5000, 10000].map((ms) => setTimeout(() => refetch(), ms));
+      return () => timers.forEach(clearTimeout);
+    }
+    if (gatewayResult === "cancelled") toast.message("Online payment cancelled");
+  }, [gatewayResult, refetch]);
 
   const voidInv = useApiMutation((reason: string) => api.post<Invoice>(`/sales/${id}/void`, { reason }), {
     invalidate: INVALIDATE,
@@ -89,6 +105,11 @@ function InvoiceView() {
             <Button variant="outline" onClick={() => print()}>
               <Printer /> Invoice
             </Button>
+            {canPay && gw.data?.enabled && (
+              <Button variant="outline" loading={checkout.isPending} onClick={() => checkout.mutate()}>
+                <CreditCard /> Pay online
+              </Button>
+            )}
             {canPay && (
               <Button onClick={() => setPayOpen(true)}>
                 <HandCoins /> Receive payment

@@ -40,6 +40,8 @@ interface Line {
   unitCost: number;
   discountPercent: number;
   taxRate: number;
+  /** YYYY-MM-DD, "" when not recorded */
+  expiryDate: string;
   allowDecimal: boolean;
   stock: number;
 }
@@ -104,6 +106,7 @@ function PurchaseForm({ purchase }: { purchase?: Purchase }) {
       unitCost: l.unitCost,
       discountPercent: l.discountType === "percent" ? (l.discountValue ?? 0) : 0,
       taxRate: l.taxRate,
+      expiryDate: l.expiryDate ?? "",
       allowDecimal: true,
       stock: 0,
     })),
@@ -125,6 +128,7 @@ function PurchaseForm({ purchase }: { purchase?: Purchase }) {
           unitCost: i.costPrice,
           discountPercent: 0,
           taxRate: i.taxRate,
+          expiryDate: "",
           allowDecimal: i.allowDecimal,
           stock: i.stock,
         },
@@ -179,6 +183,7 @@ function PurchaseForm({ purchase }: { purchase?: Purchase }) {
         discountType: l.discountPercent > 0 ? "percent" : null,
         discountValue: l.discountPercent || null,
         taxRate: l.taxRate,
+        expiryDate: l.expiryDate || null,
       })),
       docDiscountType,
       docDiscountValue,
@@ -233,6 +238,7 @@ function PurchaseForm({ purchase }: { purchase?: Purchase }) {
                     <TableRow className="bg-muted/40 hover:bg-muted/40">
                       <TableHead>Item</TableHead>
                       <TableHead align="right">Qty</TableHead>
+                      <TableHead>Expires</TableHead>
                       <TableHead align="right">Unit cost</TableHead>
                       <TableHead align="right">Disc.</TableHead>
                       <TableHead align="right">Tax</TableHead>
@@ -252,6 +258,9 @@ function PurchaseForm({ purchase }: { purchase?: Purchase }) {
                         </TableCell>
                         <TableCell className="w-24">
                           <QtyInput size="sm" value={l.quantity} allowDecimal={l.allowDecimal} onChange={(v) => update(l.key, { quantity: v })} />
+                        </TableCell>
+                        <TableCell className="w-40">
+                          <Input type="date" aria-label="Expiry date" className="h-8" value={l.expiryDate} onChange={(e) => update(l.key, { expiryDate: e.target.value })} />
                         </TableCell>
                         <TableCell className="w-32">
                           <MoneyInput hideSymbol className="h-8 text-right" value={l.unitCost} onChange={(v) => update(l.key, { unitCost: v })} />

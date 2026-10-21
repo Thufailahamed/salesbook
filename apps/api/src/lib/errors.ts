@@ -2,7 +2,7 @@ import type { ZodError } from "zod";
 
 export class ApiError extends Error {
   constructor(
-    public status: 400 | 401 | 403 | 404 | 409 | 422 | 500,
+    public status: 400 | 401 | 402 | 403 | 404 | 409 | 422 | 500,
     public code: string,
     message: string,
     public details?: unknown,

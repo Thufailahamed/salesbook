@@ -154,6 +154,7 @@ export function CustomItemDialog({ open, onOpenChange, onAdd }: { open: boolean;
               listPrice: price,
               retailPrice: price,
               wholesalePrice: null,
+              promotion: null,
               discountType: null,
               discountValue: null,
               taxRate: rate,

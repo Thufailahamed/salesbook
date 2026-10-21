@@ -4,6 +4,7 @@ import type {
   ProductListItem,
   ProductOption,
   ProductType,
+  PromotionTerms,
   SellableItem,
   Variant,
   VariantStock,
@@ -12,6 +13,7 @@ import { brands, categories, locations, products, stockLevels, taxRates, units, 
 import type { Ctx } from "../lib/context";
 import { notFound } from "../lib/errors";
 import { likeQ, pageParams, paged } from "../lib/http";
+import { promotionsFor } from "./promotions";
 import { displayName } from "./stock";
 
 // ---------------------------------------------------------------- product detail
@@ -264,10 +266,11 @@ function sellableSelect(ctx: Ctx, locationId?: string) {
 
 type SellableRow = Awaited<ReturnType<ReturnType<typeof sellableSelect>["where"]>>[number];
 
-function mapSellable(r: SellableRow): SellableItem {
+function mapSellable(r: SellableRow, promotion: PromotionTerms | null): SellableItem {
   const tracked = r.trackInventory && r.type !== "service";
   return {
     variantId: r.v.id,
+    promotion,
     productId: r.v.productId,
     productName: r.productName,
     variantName: r.v.name,
@@ -324,7 +327,8 @@ export async function searchSellable(
     .where(and(...conds))
     .orderBy(...order)
     .limit(q.limit);
-  return rows.map(mapSellable);
+  const promos = await promotionsFor(ctx, rows.map((r) => ({ variantId: r.v.id, productId: r.v.productId })));
+  return rows.map((r) => mapSellable(r, promos.get(r.v.id) ?? null));
 }
 
 export async function lookupSellable(ctx: Ctx, code: string, locationId?: string): Promise<SellableItem> {
@@ -342,5 +346,6 @@ export async function lookupSellable(ctx: Ctx, code: string, locationId?: string
     .orderBy(sql`CASE WHEN upper(${variants.barcode}) = upper(${c}) THEN 0 ELSE 1 END`)
     .limit(1);
   if (!rows[0]) throw notFound("Product");
-  return mapSellable(rows[0]);
+  const promos = await promotionsFor(ctx, [{ variantId: rows[0].v.id, productId: rows[0].v.productId }]);
+  return mapSellable(rows[0], promos.get(rows[0].v.id) ?? null);
 }

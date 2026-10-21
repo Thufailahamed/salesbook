@@ -5,6 +5,8 @@ import {
   type DiscountType,
   type Invoice,
   type PriceTier,
+  type PromotionTerms,
+  promoPrice,
   type ReturnableLine,
   type SellableItem,
 } from "@shopbooks/shared";
@@ -23,6 +25,8 @@ export interface CartLine {
   listPrice: number;
   retailPrice: number;
   wholesalePrice: number | null;
+  /** Offer that was applied when the line was priced (re-applied when the tier changes). */
+  promotion: PromotionTerms | null;
   discountType: DiscountType | null;
   discountValue: number | null;
   taxRate: number;
@@ -73,8 +77,16 @@ export function tierPrice(retail: number, wholesale: number | null, tier: PriceT
   return tier === "wholesale" && wholesale != null ? wholesale : retail;
 }
 
+/** What one unit sells for: the tier price, less any offer running today. */
+export function unitPriceFor(
+  item: { price: number; wholesalePrice: number | null; promotion: PromotionTerms | null },
+  tier: PriceTier,
+): number {
+  return promoPrice(tierPrice(item.price, item.wholesalePrice, tier), item.promotion);
+}
+
 export function lineFromItem(item: SellableItem, tier: PriceTier): CartLine {
-  const price = tierPrice(item.price, item.wholesalePrice, tier);
+  const price = unitPriceFor(item, tier);
   return {
     key: lineKey(),
     variantId: item.variantId,
@@ -87,6 +99,7 @@ export function lineFromItem(item: SellableItem, tier: PriceTier): CartLine {
     listPrice: price,
     retailPrice: item.price,
     wholesalePrice: item.wholesalePrice,
+    promotion: item.promotion,
     discountType: null,
     discountValue: null,
     taxRate: item.taxRate,
@@ -101,7 +114,7 @@ export function lineFromItem(item: SellableItem, tier: PriceTier): CartLine {
 
 /** Add an item: bumps the quantity of an identical, undiscounted line, else appends. */
 export function addItem(lines: CartLine[], item: SellableItem, tier: PriceTier): CartLine[] {
-  const price = tierPrice(item.price, item.wholesalePrice, tier);
+  const price = unitPriceFor(item, tier);
   const idx = lines.findIndex((l) => l.variantId === item.variantId && l.unitPrice === price && !l.discountType && !l.note);
   if (idx >= 0) return lines.map((l, i) => (i === idx ? { ...l, quantity: l.quantity + 1 } : l));
   return [...lines, lineFromItem(item, tier)];
@@ -111,7 +124,7 @@ export function addItem(lines: CartLine[], item: SellableItem, tier: PriceTier):
 export function repriceForTier(lines: CartLine[], tier: PriceTier): CartLine[] {
   return lines.map((l) => {
     if (!l.variantId) return l;
-    const next = tierPrice(l.retailPrice, l.wholesalePrice, tier);
+    const next = unitPriceFor({ price: l.retailPrice, wholesalePrice: l.wholesalePrice, promotion: l.promotion }, tier);
     return l.unitPrice === l.listPrice ? { ...l, unitPrice: next, listPrice: next } : { ...l, listPrice: next };
   });
 }

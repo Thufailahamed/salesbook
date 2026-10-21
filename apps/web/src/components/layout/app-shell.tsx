@@ -8,6 +8,9 @@ import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useHotkeys } from "@/hooks/use-hotkeys";
 import { useSession } from "@/hooks/use-session";
 import { cn } from "@/lib/utils";
+import { BillingPanel } from "@/components/billing-panel";
+import { useMeQuery } from "./auth-guard";
+import { PageLoader } from "@/components/loading";
 import { Brand } from "./brand";
 import { CommandPaletteProvider } from "./command-palette";
 import { Sidebar, SidebarNav } from "./sidebar";
@@ -20,6 +23,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { can } = useSession();
+  const { data: me } = useMeQuery();
+  const sub = me?.subscription;
+  const locked = sub?.state === "expired" && !pathname.startsWith("/settings");
 
   React.useEffect(() => setMobileOpen(false), [pathname]);
   useHotkeys("f2", () => can("pos.sell") && router.push("/pos"));
@@ -54,7 +60,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <Topbar onOpenMobileNav={() => setMobileOpen(true)} />
             <main className="flex-1">
-              <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 lg:px-10 lg:py-9">{children}</div>
+              <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 lg:px-10 lg:py-9">
+                {sub?.state === "expiring" && (
+                  <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning-soft px-4 py-2.5 text-[13px] font-medium text-warning-soft-foreground">
+                    <span>Your {sub.planName ?? ""} subscription ends in {sub.daysLeft} day{sub.daysLeft === 1 ? "" : "s"}.</span>
+                    <Link href="/settings?tab=billing" className="underline">Renew now</Link>
+                  </div>
+                )}
+                {locked ? (
+                  <div className="mx-auto max-w-4xl">
+                    <h1 className="font-display text-[28px] font-semibold tracking-[-0.02em]">Your subscription has expired</h1>
+                    <p className="mt-1 mb-6 text-[14px] text-muted-foreground">Your data is safe. Renew to get back to selling.</p>
+                    <React.Suspense fallback={<PageLoader />}><BillingPanel canManage={can("settings.manage")} /></React.Suspense>
+                  </div>
+                ) : (
+                  children
+                )}
+              </div>
             </main>
           </div>
         </div>

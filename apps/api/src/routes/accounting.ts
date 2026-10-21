@@ -1,20 +1,27 @@
-import { and, desc, eq, gte, inArray, like, lte, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, lt, or, sql, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
   ACCOUNT_SUBTYPES,
   accountSchema,
+  booksLockSchema,
+  depreciationSchema,
   fundsTransferSchema,
   isDebitNormal,
   journalListQuerySchema,
   journalSchema,
   ledgerQuerySchema,
+  reconciliationQuerySchema,
+  reconciliationSchema,
   startOfMonth,
   type AccountType,
   type LedgerEntry,
   type LedgerResponse,
+  type Reconciliation,
+  type ReconciliationLine,
+  type ReconciliationView,
 } from "@shopbooks/shared";
-import { accounts, journalEntries, journalLines, paymentMethods } from "../db/schema";
+import { accounts, bankStatementLines, businesses, journalEntries, journalLines, paymentMethods, reconciliations } from "../db/schema";
 import type { AppEnv } from "../env";
 import { requirePerm } from "../lib/auth";
 import { docDate, type Ctx } from "../lib/context";
@@ -24,6 +31,8 @@ import { newId } from "../lib/ids";
 import { vJson, vQuery } from "../lib/validate";
 import { getJournalDto, journalSelect, mapAccount, mapJournalEntry } from "../services/accounting-read";
 import { accountSums, num, type AccountRow } from "../services/reports-utils";
+import type { Stmt } from "../lib/batch";
+import { assertReconcilable, DEPRECIATION_ACCOUNTS, ensureAccount } from "../services/ledger-accounts";
 import { Tx, queueReversals } from "../services/tx";
 
 const app = new Hono<AppEnv>();
@@ -267,6 +276,237 @@ app.post("/transfers", manage, vJson(fundsTransferSchema), async (c) => {
   tx.audit("journal.transfer", `Transfer ${input.amount} from ${from.name} to ${to.name}`, "journal", id);
   await tx.commit();
   return c.json(await getJournalDto(ctx, id!), 201);
+});
+
+// ---------------------------------------------------------------- depreciation
+
+app.post("/depreciation", manage, vJson(depreciationSchema), async (c) => {
+  const ctx = c.get("ctx");
+  const input = c.req.valid("json");
+  const tx = new Tx(ctx);
+  const expense = await ensureAccount(ctx, tx, DEPRECIATION_ACCOUNTS.expense);
+  const accumulated = await ensureAccount(ctx, tx, DEPRECIATION_ACCOUNTS.accumulated);
+  const id = tx.journal({
+    date: input.date,
+    memo: `Depreciation · ${input.memo}`,
+    sourceType: "manual",
+    lines: [
+      { accountId: expense, debit: input.amount },
+      { accountId: accumulated, credit: input.amount },
+    ],
+  });
+  tx.audit("journal.depreciation", `Depreciation ${input.amount}: ${input.memo}`, "journal", id);
+  await tx.commit();
+  return c.json(await getJournalDto(ctx, id!), 201);
+});
+
+// ---------------------------------------------------------------- books lock
+
+app.put("/books-lock", manage, vJson(booksLockSchema), async (c) => {
+  const ctx = c.get("ctx");
+  const { closedThrough } = c.req.valid("json");
+  // Closing through today would block today's sales, so the lock can only reach back to yesterday or earlier.
+  if (closedThrough && closedThrough >= ctx.today) throw badRequest("Close the books through a date before today");
+  const tx = new Tx(ctx);
+  tx.add(ctx.db.update(businesses).set({ booksClosedThrough: closedThrough }).where(eq(businesses.id, ctx.businessId)) as unknown as Stmt);
+  tx.audit(
+    "books.lock",
+    closedThrough ? `Books closed through ${closedThrough}` : "Books reopened",
+    "business",
+    ctx.businessId,
+  );
+  await tx.commit();
+  return c.json({ booksClosedThrough: closedThrough });
+});
+
+// ---------------------------------------------------------------- bank reconciliation
+
+function mapReconciliation(r: typeof reconciliations.$inferSelect): Reconciliation {
+  return {
+    id: r.id,
+    accountId: r.accountId,
+    statementDate: r.statementDate,
+    statementBalance: r.statementBalance,
+    lineCount: r.lineCount,
+    createdAt: r.createdAt,
+  };
+}
+
+/** Uncleared lines on the account dated on or before the statement date, signed debit − credit. */
+async function unclearedLines(ctx: Ctx, accountId: string, statementDate: string) {
+  return ctx.db
+    .select({
+      id: journalLines.id,
+      date: journalLines.date,
+      entryNumber: journalEntries.number,
+      memo: sql<string>`coalesce(${journalLines.memo}, ${journalEntries.memo})`,
+      amount: sql<number>`${journalLines.debit} - ${journalLines.credit}`,
+    })
+    .from(journalLines)
+    .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
+    .where(
+      and(
+        eq(journalLines.businessId, ctx.businessId),
+        eq(journalLines.accountId, accountId),
+        isNull(journalLines.reconciliationId),
+        lte(journalLines.date, statementDate),
+      ),
+    )
+    .orderBy(journalLines.date, journalEntries.number);
+}
+
+async function clearedBalance(ctx: Ctx, accountId: string) {
+  const [row] = await ctx.db
+    .select({ v: sql<number>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}), 0)` })
+    .from(journalLines)
+    .where(
+      and(
+        eq(journalLines.businessId, ctx.businessId),
+        eq(journalLines.accountId, accountId),
+        isNotNull(journalLines.reconciliationId),
+      ),
+    );
+  return num(row?.v);
+}
+
+app.get("/reconciliation", view, vQuery(reconciliationQuerySchema), async (c) => {
+  const ctx = c.get("ctx");
+  const q = c.req.valid("query");
+  const acc = await getAccountRow(ctx, q.accountId);
+  assertReconcilable(acc);
+  const [rows, cleared, history, sums, matchedRows] = await Promise.all([
+    unclearedLines(ctx, acc.id, q.statementDate),
+    clearedBalance(ctx, acc.id),
+    ctx.db
+      .select()
+      .from(reconciliations)
+      .where(and(eq(reconciliations.businessId, ctx.businessId), eq(reconciliations.accountId, acc.id)))
+      .orderBy(desc(reconciliations.statementDate), desc(reconciliations.createdAt))
+      .limit(10),
+    accountSums(ctx, { to: ctx.today }),
+    ctx.db
+      .select({ id: bankStatementLines.matchedLineId })
+      .from(bankStatementLines)
+      .where(
+        and(
+          eq(bankStatementLines.businessId, ctx.businessId),
+          eq(bankStatementLines.accountId, acc.id),
+          isNotNull(bankStatementLines.matchedLineId),
+        ),
+      ),
+  ]);
+  const matchedIds = new Set(matchedRows.map((m) => m.id));
+  const result: ReconciliationView = {
+    account: mapAccount(acc, sums.get(acc.id)),
+    statementDate: q.statementDate,
+    clearedBalance: cleared,
+    uncleared: rows.map<ReconciliationLine>((r) => ({
+      lineId: r.id,
+      date: r.date,
+      entryNumber: r.entryNumber,
+      memo: r.memo,
+      amount: num(r.amount),
+      matched: matchedIds.has(r.id),
+    })),
+    history: history.map(mapReconciliation),
+  };
+  return c.json(result);
+});
+
+app.post("/reconciliations", manage, vJson(reconciliationSchema), async (c) => {
+  const ctx = c.get("ctx");
+  const input = c.req.valid("json");
+  const acc = await getAccountRow(ctx, input.accountId);
+  assertReconcilable(acc);
+  const [last] = await ctx.db
+    .select({ d: reconciliations.statementDate })
+    .from(reconciliations)
+    .where(and(eq(reconciliations.businessId, ctx.businessId), eq(reconciliations.accountId, acc.id)))
+    .orderBy(desc(reconciliations.statementDate))
+    .limit(1);
+  if (last && input.statementDate < last.d) {
+    throw badRequest(`The last reconciliation was for ${last.d}. Use a statement date on or after it.`);
+  }
+
+  const lineIds = [...new Set(input.lineIds)];
+  const open = new Map((await unclearedLines(ctx, acc.id, input.statementDate)).map((r) => [r.id, num(r.amount)]));
+  let selectedTotal = 0;
+  for (const id of lineIds) {
+    const amount = open.get(id);
+    if (amount === undefined) throw badRequest("A selected line is already reconciled or is dated after the statement date");
+    selectedTotal += amount;
+  }
+  const cleared = await clearedBalance(ctx, acc.id);
+  if (cleared + selectedTotal !== input.statementBalance) {
+    throw badRequest("The selected lines don't match the statement balance yet");
+  }
+
+  const tx = new Tx(ctx);
+  const id = newId();
+  tx.add(
+    ctx.db.insert(reconciliations).values({
+      id,
+      businessId: ctx.businessId,
+      accountId: acc.id,
+      statementDate: input.statementDate,
+      statementBalance: input.statementBalance,
+      lineCount: lineIds.length,
+      createdBy: ctx.userId,
+      createdAt: ctx.now,
+    }) as unknown as Stmt,
+  );
+  // D1 allows 100 bound parameters per statement, so stamp the lines in chunks.
+  for (let i = 0; i < lineIds.length; i += 90) {
+    tx.add(
+      ctx.db
+        .update(journalLines)
+        .set({ reconciliationId: id })
+        .where(and(eq(journalLines.businessId, ctx.businessId), inArray(journalLines.id, lineIds.slice(i, i + 90)))) as unknown as Stmt,
+    );
+  }
+  tx.audit("reconciliation.create", `Reconciled ${acc.name} to ${input.statementDate} (${lineIds.length} lines)`, "reconciliation", id);
+  await tx.commit();
+  return c.json(
+    mapReconciliation({
+      id,
+      businessId: ctx.businessId,
+      accountId: acc.id,
+      statementDate: input.statementDate,
+      statementBalance: input.statementBalance,
+      lineCount: lineIds.length,
+      createdBy: ctx.userId,
+      createdAt: ctx.now,
+    }),
+    201,
+  );
+});
+
+/** Undo the most recent reconciliation of an account, releasing its lines to be cleared again. */
+app.delete("/reconciliations/:id", manage, async (c) => {
+  const ctx = c.get("ctx");
+  const [rec] = await ctx.db
+    .select()
+    .from(reconciliations)
+    .where(and(eq(reconciliations.id, c.req.param("id")), eq(reconciliations.businessId, ctx.businessId)));
+  if (!rec) throw notFound("Reconciliation");
+  const [latest] = await ctx.db
+    .select({ id: reconciliations.id })
+    .from(reconciliations)
+    .where(and(eq(reconciliations.businessId, ctx.businessId), eq(reconciliations.accountId, rec.accountId)))
+    .orderBy(desc(reconciliations.statementDate), desc(reconciliations.createdAt))
+    .limit(1);
+  if (latest?.id !== rec.id) throw badRequest("Only the latest reconciliation of an account can be undone");
+  const tx = new Tx(ctx);
+  tx.add(
+    ctx.db
+      .update(journalLines)
+      .set({ reconciliationId: null })
+      .where(and(eq(journalLines.businessId, ctx.businessId), eq(journalLines.reconciliationId, rec.id))) as unknown as Stmt,
+    ctx.db.delete(reconciliations).where(eq(reconciliations.id, rec.id)) as unknown as Stmt,
+  );
+  tx.audit("reconciliation.undo", `Undid reconciliation to ${rec.statementDate}`, "reconciliation", rec.id);
+  await tx.commit();
+  return c.json({ ok: true as const });
 });
 
 // ---------------------------------------------------------------- ledger

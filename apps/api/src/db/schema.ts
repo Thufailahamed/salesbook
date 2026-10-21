@@ -46,6 +46,14 @@ export const businesses = sqliteTable("businesses", {
   loyaltyMinRedeem: integer("loyalty_min_redeem").notNull().default(0),
   returnWindowDays: integer("return_window_days").notNull().default(30),
   creditDueDays: integer("credit_due_days").notNull().default(30),
+  /** Entries dated on or before this day are locked (null = books open). */
+  booksClosedThrough: text("books_closed_through"),
+  /** active | suspended (set by the platform admin) */
+  status: text("status").notNull().default("active"),
+  /** Subscribed plan; null for shops created before plans existed (never expire). */
+  planId: text("plan_id"),
+  /** Epoch ms the paid period ends; null = no expiry. */
+  subscriptionEndsAt: integer("subscription_ends_at"),
   createdAt: createdAt(),
 });
 
@@ -265,6 +273,26 @@ export const stockLevels = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.variantId, t.locationId] }),
     index("stock_levels_business_idx").on(t.businessId, t.locationId),
+  ],
+);
+
+/**
+ * Expiry lots: how much of a variant's stock at a location carries each expiry date. The lots of a location
+ * always add up to its stock_levels quantity. Sales and transfers take the earliest expiry first (FEFO).
+ */
+export const stockLots = sqliteTable(
+  "stock_lots",
+  {
+    businessId: businessId(),
+    variantId: text("variant_id").notNull(),
+    locationId: text("location_id").notNull(),
+    /** YYYY-MM-DD, or "" when no expiry date was recorded (sorts last). */
+    expiryDate: text("expiry_date").notNull().default(""),
+    quantity: real("quantity").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.variantId, t.locationId, t.expiryDate] }),
+    index("stock_lots_business_idx").on(t.businessId, t.locationId),
   ],
 );
 
@@ -626,6 +654,26 @@ export const quotationLines = sqliteTable(
   (t) => [index("quotation_lines_quotation_idx").on(t.quotationId)],
 );
 
+/** Scheduled price offers. Applied automatically at the POS and re-checked at checkout. */
+export const promotions = sqliteTable(
+  "promotions",
+  {
+    id: id(),
+    businessId: businessId(),
+    name: text("name").notNull(),
+    productId: text("product_id"),
+    variantId: text("variant_id"),
+    kind: text("kind").notNull(),
+    value: real("value").notNull().default(0),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date"),
+    isActive: bool("is_active", true),
+    createdAt: createdAt(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("promotions_business_idx").on(t.businessId, t.isActive)],
+);
+
 export const heldSales = sqliteTable(
   "held_sales",
   {
@@ -709,6 +757,8 @@ export const purchaseLines = sqliteTable(
     total: money("total"),
     landedUnitCost: money("landed_unit_cost"),
     quantityReturned: real("quantity_returned").notNull().default(0),
+    /** Expiry / best-before date of the goods on this line (YYYY-MM-DD), optional. */
+    expiryDate: text("expiry_date"),
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (t) => [index("purchase_lines_purchase_idx").on(t.purchaseId)],
@@ -941,12 +991,29 @@ export const journalLines = sqliteTable(
     partyType: text("party_type"),
     partyId: text("party_id"),
     locationId: text("location_id"),
+    reconciliationId: text("reconciliation_id"),
   },
   (t) => [
     index("journal_lines_entry_idx").on(t.entryId),
     index("journal_lines_account_idx").on(t.businessId, t.accountId, t.date),
     index("journal_lines_date_idx").on(t.businessId, t.date),
   ],
+);
+
+/** A bank statement reconciliation: the journal lines it cleared are stamped with its id. */
+export const reconciliations = sqliteTable(
+  "reconciliations",
+  {
+    id: id(),
+    businessId: businessId(),
+    accountId: text("account_id").notNull(),
+    statementDate: text("statement_date").notNull(),
+    statementBalance: money("statement_balance"),
+    lineCount: integer("line_count").notNull(),
+    createdBy: text("created_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("reconciliations_account_idx").on(t.businessId, t.accountId, t.statementDate)],
 );
 
 export const auditLogs = sqliteTable(
@@ -964,4 +1031,152 @@ export const auditLogs = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index("audit_logs_business_idx").on(t.businessId, t.createdAt)],
+);
+
+/** A fixed asset: its cost is posted to a fixed-asset account and depreciated straight-line, one month at a time. */
+export const fixedAssets = sqliteTable(
+  "fixed_assets",
+  {
+    id: id(),
+    businessId: businessId(),
+    name: text("name").notNull(),
+    accountId: text("account_id").notNull(),
+    paidFromAccountId: text("paid_from_account_id").notNull(),
+    acquiredOn: text("acquired_on").notNull(),
+    cost: money("cost"),
+    salvage: money("salvage"),
+    usefulLifeMonths: integer("useful_life_months").notNull(),
+    accumulated: money("accumulated"),
+    depreciatedThrough: text("depreciated_through"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("fixed_assets_business_idx").on(t.businessId)],
+);
+
+/** A line from a bank statement. It is matched to a journal line on the same account once the books agree with it. */
+export const bankStatementLines = sqliteTable(
+  "bank_statement_lines",
+  {
+    id: id(),
+    businessId: businessId(),
+    accountId: text("account_id").notNull(),
+    date: text("date").notNull(),
+    description: text("description").notNull(),
+    amount: money("amount"),
+    matchedLineId: text("matched_line_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("bank_statement_lines_account_idx").on(t.businessId, t.accountId, t.date)],
+);
+
+// ---------------------------------------------------------------- online payments (payments.lk)
+
+export const gatewaySettings = sqliteTable("gateway_settings", {
+  businessId: text("business_id").primaryKey(),
+  isEnabled: bool("is_enabled", false),
+  /** payments.lk secret key (sk_test_… / sk_live_…). Never returned to the client. */
+  secretKey: text("secret_key"),
+  /** Webhook signing secret used to verify the Payments-Signature header. */
+  webhookSecret: text("webhook_secret"),
+  /** Payment method (and so ledger account) online receipts settle into. */
+  methodId: text("method_id"),
+  updatedAt: integer("updated_at").notNull().default(0),
+});
+
+export const gatewayCheckouts = sqliteTable(
+  "gateway_checkouts",
+  {
+    id: id(),
+    businessId: businessId(),
+    docType: text("doc_type").notNull(),
+    docId: text("doc_id").notNull(),
+    amount: money("amount"),
+    /** pending | paid | failed | expired */
+    status: text("status").notNull().default("pending"),
+    providerCheckoutId: text("provider_checkout_id"),
+    providerPaymentId: text("provider_payment_id"),
+    url: text("url"),
+    failureMessage: text("failure_message"),
+    createdBy: text("created_by").notNull(),
+    createdAt: createdAt(),
+    paidAt: integer("paid_at"),
+  },
+  (t) => [index("gateway_checkouts_doc_idx").on(t.businessId, t.docType, t.docId)],
+);
+
+// ---------------------------------------------------------------- platform (super admin, plans, subscriptions)
+
+export const plans = sqliteTable("plans", {
+  id: id(),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** LKR cents per period */
+  priceCents: money("price_cents"),
+  periodDays: integer("period_days").notNull().default(30),
+  /** 0 = unlimited */
+  maxUsers: integer("max_users").notNull().default(0),
+  maxLocations: integer("max_locations").notNull().default(0),
+  isActive: bool("is_active", true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: createdAt(),
+});
+
+export const platformAdmins = sqliteTable(
+  "platform_admins",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    isActive: bool("is_active", true),
+    lastLoginAt: integer("last_login_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("platform_admins_email_uq").on(t.email)],
+);
+
+export const platformSessions = sqliteTable("platform_sessions", {
+  id: text("id").primaryKey(),
+  adminId: text("admin_id").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: createdAt(),
+});
+
+/** Single row (id = "platform"): the platform's own payments.lk account used to sell plans. */
+export const platformSettings = sqliteTable("platform_settings", {
+  id: text("id").primaryKey(),
+  /** When true, /auth/signup is closed and new shops must buy a plan. */
+  requirePayment: bool("require_payment", false),
+  isEnabled: bool("is_enabled", false),
+  secretKey: text("secret_key"),
+  webhookSecret: text("webhook_secret"),
+  updatedAt: integer("updated_at").notNull().default(0),
+});
+
+export const platformOrders = sqliteTable(
+  "platform_orders",
+  {
+    id: id(),
+    /** signup | renewal */
+    kind: text("kind").notNull(),
+    planId: text("plan_id").notNull(),
+    planName: text("plan_name").notNull(),
+    businessId: text("business_id"),
+    email: text("email").notNull(),
+    shopName: text("shop_name").notNull(),
+    amount: money("amount"),
+    periodDays: integer("period_days").notNull().default(30),
+    /** signup only: SignupInput without the password */
+    signupData: text("signup_data"),
+    passwordHash: text("password_hash"),
+    /** pending | paid | failed | expired */
+    status: text("status").notNull().default("pending"),
+    providerCheckoutId: text("provider_checkout_id"),
+    providerPaymentId: text("provider_payment_id"),
+    url: text("url"),
+    failureMessage: text("failure_message"),
+    createdAt: createdAt(),
+    paidAt: integer("paid_at"),
+  },
+  (t) => [index("platform_orders_status_idx").on(t.status, t.createdAt)],
 );

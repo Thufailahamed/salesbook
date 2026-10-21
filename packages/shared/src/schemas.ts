@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PROMOTION_KINDS } from "./promotions";
 import {
   ACCOUNT_TYPES,
   ADJUSTMENT_REASONS,
@@ -514,6 +515,29 @@ export const heldSaleSchema = z.object({
 });
 export type HeldSaleInput = z.infer<typeof heldSaleSchema>;
 
+// ---------------------------------------------------------------- promotions
+
+export const promotionSchema = z
+  .object({
+    name: z.string().trim().min(1, "Give the offer a name").max(120),
+    /** Set productId to offer every variant of a product; set variantId for one variant. */
+    productId: zId.nullish(),
+    variantId: zId.nullish(),
+    kind: z.enum(PROMOTION_KINDS),
+    value: z.number().min(0).max(1_000_000_000_000),
+    startDate: zDate,
+    endDate: zDate.nullish(),
+    isActive: z.boolean().default(true),
+  })
+  .refine((v) => !!(v.productId || v.variantId), { message: "Choose a product or variant", path: ["productId"] })
+  .refine((v) => v.kind !== "percent" || (v.value > 0 && v.value <= 100), {
+    message: "Percent must be between 0 and 100",
+    path: ["value"],
+  })
+  .refine((v) => v.kind !== "fixed_price" || v.value >= 0, { message: "Price can't be negative", path: ["value"] })
+  .refine((v) => !v.endDate || v.endDate >= v.startDate, { message: "End date is before the start date", path: ["endDate"] });
+export type PromotionInput = z.infer<typeof promotionSchema>;
+
 // ---------------------------------------------------------------- purchases
 
 export const purchaseLineSchema = z.object({
@@ -523,6 +547,8 @@ export const purchaseLineSchema = z.object({
   discountType: zDiscountType,
   discountValue: z.number().min(0).nullish(),
   taxRate: zPercent.nullish(),
+  /** Expiry / best-before date of the goods received on this line. */
+  expiryDate: zDate.nullish(),
 });
 export type PurchaseLineInput = z.infer<typeof purchaseLineSchema>;
 
@@ -727,3 +753,140 @@ export const reportQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).optional(),
 });
 export type ReportQuery = z.infer<typeof reportQuerySchema>;
+
+export const booksLockSchema = z.object({ closedThrough: zDate.nullable() });
+export type BooksLockInput = z.infer<typeof booksLockSchema>;
+
+export const depreciationSchema = z.object({
+  date: zDate,
+  amount: zMoneyPos.refine((v) => v > 0, "Amount must be positive"),
+  memo: zName(200),
+});
+export type DepreciationInput = z.infer<typeof depreciationSchema>;
+
+export const reconciliationQuerySchema = z.object({
+  accountId: zId,
+  statementDate: zDate,
+});
+
+export const reconciliationSchema = z.object({
+  accountId: zId,
+  statementDate: zDate,
+  statementBalance: zMoney,
+  lineIds: z.array(zId).min(0).max(5000),
+});
+export type ReconciliationInput = z.infer<typeof reconciliationSchema>;
+
+export const fixedAssetSchema = z
+  .object({
+    name: zName(120),
+    accountId: zId,
+    paidFromAccountId: zId,
+    acquiredOn: zDate,
+    cost: zMoneyPos.refine((v) => v > 0, "Cost must be positive"),
+    salvage: zMoneyPos,
+    usefulLifeMonths: z.number().int().min(1).max(600),
+  })
+  .refine((v) => v.salvage < v.cost, { message: "Salvage value must be less than the cost", path: ["salvage"] });
+export type FixedAssetInput = z.infer<typeof fixedAssetSchema>;
+
+export const depreciationRunSchema = z.object({ throughDate: zDate });
+export type DepreciationRunInput = z.infer<typeof depreciationRunSchema>;
+
+export const bankStatementImportSchema = z.object({
+  accountId: zId,
+  rows: z
+    .array(z.object({ date: zDate, description: zName(200), amount: zMoney.refine((v) => v !== 0, "Amount can't be zero") }))
+    .min(1)
+    .max(2000),
+});
+export type BankStatementImportInput = z.infer<typeof bankStatementImportSchema>;
+
+export const bankStatementQuerySchema = z.object({ accountId: zId });
+export const bankMatchSchema = z.object({ accountId: zId });
+
+// ---------------------------------------------------------------- online payments (payments.lk)
+
+export const gatewaySettingsSchema = z.object({
+  isEnabled: z.boolean(),
+  /** Omit (or send empty) to keep the stored key. */
+  secretKey: z.string().trim().max(200).nullish(),
+  webhookSecret: z.string().trim().max(200).nullish(),
+  methodId: z.string().nullish(),
+});
+export type GatewaySettingsInput = z.infer<typeof gatewaySettingsSchema>;
+
+export const createCheckoutSchema = z.object({
+  invoiceId: zId,
+  /** Minor units; defaults to the invoice balance due. */
+  amount: zMoneyPos.optional(),
+  /** Browser origin to return to after paying. */
+  returnOrigin: z.string().max(200).optional(),
+});
+export type CreateCheckoutInput = z.infer<typeof createCheckoutSchema>;
+
+// ---------------------------------------------------------------- platform admin & subscriptions
+
+export const planSchema = z.object({
+  name: zName(80),
+  description: zText(500),
+  /** LKR cents per period */
+  priceCents: zMoneyPos,
+  periodDays: z.number().int().min(1).max(3660),
+  /** 0 = unlimited */
+  maxUsers: z.number().int().min(0).max(10_000),
+  maxLocations: z.number().int().min(0).max(10_000),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+});
+export type PlanInput = z.infer<typeof planSchema>;
+
+/** Public: buy a plan and create the shop once the payment succeeds. */
+export const planPurchaseSchema = z.object({
+  planId: zId,
+  signup: signupSchema,
+  returnOrigin: z.string().max(200).optional(),
+});
+export type PlanPurchaseInput = z.infer<typeof planPurchaseSchema>;
+
+export const renewSchema = z.object({ planId: zId, returnOrigin: z.string().max(200).optional() });
+export type RenewInput = z.infer<typeof renewSchema>;
+
+export const platformSettingsSchema = z.object({
+  requirePayment: z.boolean(),
+  isEnabled: z.boolean(),
+  /** Omit/empty to keep the stored value. */
+  secretKey: z.string().trim().max(200).nullish(),
+  webhookSecret: z.string().trim().max(200).nullish(),
+});
+export type PlatformSettingsInput = z.infer<typeof platformSettingsSchema>;
+
+export const platformShopUpdateSchema = z.object({
+  status: z.enum(["active", "suspended"]).optional(),
+  planId: z.string().nullish(),
+  /** YYYY-MM-DD (end of that day) or null for no expiry */
+  subscriptionEndsOn: zDate.nullish(),
+  /** Adds days to the current end (or to now when expired) */
+  extendDays: z.number().int().min(1).max(3660).optional(),
+});
+export type PlatformShopUpdateInput = z.infer<typeof platformShopUpdateSchema>;
+
+export const platformUserUpdateSchema = z.object({
+  isActive: z.boolean().optional(),
+  password: z.string().min(8).max(200).optional(),
+});
+export type PlatformUserUpdateInput = z.infer<typeof platformUserUpdateSchema>;
+
+export const platformAdminCreateSchema = z.object({
+  name: zName(120),
+  email: z.email().max(200),
+  password: z.string().min(8).max(200),
+});
+export type PlatformAdminCreateInput = z.infer<typeof platformAdminCreateSchema>;
+
+export const platformShopListQuerySchema = listQuerySchema.extend({
+  status: z.enum(["active", "suspended", "expired"]).optional(),
+});
+export const platformOrderListQuerySchema = listQuerySchema.extend({
+  status: z.enum(["pending", "paid", "failed", "expired"]).optional(),
+});

@@ -1,3 +1,4 @@
+import { assertWithinPlan } from "../services/billing";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { userCreateSchema, userUpdateSchema } from "@shopbooks/shared";
@@ -35,6 +36,7 @@ app.post("/", vJson(userCreateSchema), async (c) => {
   const ctx = c.get("ctx");
   const input = c.req.valid("json");
   if (input.role === "owner" && ctx.role !== "owner") throw forbidden("Only an owner can add another owner");
+  await assertWithinPlan(ctx, "users");
   const email = input.email.toLowerCase();
   const [exists] = await ctx.db.select({ id: users.id }).from(users).where(eq(users.email, email));
   if (exists) throw conflict("A user with this email already exists");

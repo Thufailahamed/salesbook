@@ -3,8 +3,9 @@
  * End-to-end business scenario test against a running API (e.g. `npm run dev:api`).
  *   node scripts/e2e.mjs [baseUrl]
  * Exercises sales, credit, returns, exchanges, store credit, gift cards, loyalty, purchases,
- * purchase returns, expenses, stock adjustments/transfers, shifts and voids — then checks that
- * the books reconcile (trial balance, balance sheet, sub-ledgers vs control accounts, stock).
+ * purchase returns, expenses, stock adjustments/transfers, shifts, voids, promotions and expiry
+ * batches — then checks that the books reconcile (trial balance, balance sheet, sub-ledgers vs control
+ * accounts, stock).
  */
 const BASE = (process.argv[2] ?? "http://localhost:8787").replace(/\/$/, "") + "/api";
 let token = "";
@@ -317,6 +318,47 @@ async function main() {
   const voided = await post(`/sales/${s9.invoice.id}/void`, { reason: "Test void" });
   eq("void status", voided.status, "void");
 
+  step("Promotion: 20% off socks shows at the POS, is charged, and stops when paused");
+  const promoWindow = { startDate: "2000-01-01", endDate: "2999-12-31" };
+  const promo = await post("/promotions", { name: "Socks sale", variantId: sock.id, kind: "percent", value: 20, isActive: true, ...promoWindow });
+  const socksItem = (await get(`/products/sellable?q=Socks&locationId=${main.id}`)).find((i) => i.variantId === sock.id);
+  eq("sellable carries the running offer", socksItem.promotion?.promotionId, promo.id);
+  const promoPrice = Math.round(socksItem.price * 0.8);
+  const promoSale = await post("/sales/checkout", {
+    locationId: main.id,
+    lines: [{ variantId: sock.id, quantity: 1, unitPrice: promoPrice }],
+    payments: [{ tender: "method", methodId: cash.id, amount: promoPrice }],
+  });
+  eq("promo sale total", promoSale.invoice.total, promoPrice);
+  await put(`/promotions/${promo.id}`, { name: "Socks sale", variantId: sock.id, kind: "percent", value: 20, isActive: false, ...promoWindow });
+  const paused = (await get(`/products/sellable?q=Socks&locationId=${main.id}`)).find((i) => i.variantId === sock.id);
+  check("paused offer no longer applies", paused.promotion === null, paused.promotion);
+
+  step("Expiry: receive two dated batches, sell the earliest expiry first");
+  const daysFromNow = (n) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+  const soon = daysFromNow(100);
+  const later = daysFromNow(300);
+  await post("/purchases", {
+    supplierId: supplier.id,
+    locationId: main.id,
+    status: "received",
+    taxInclusive: false,
+    lines: [
+      { variantId: sock.id, quantity: 10, unitCost: 15000, taxRate: 0, expiryDate: later },
+      { variantId: sock.id, quantity: 10, unitCost: 15000, taxRate: 0, expiryDate: soon },
+    ],
+  });
+  const expiryQty = (rep, date) => rep.rows.filter((r) => r.variantId === sock.id && r.expiryDate === date).reduce((n, r) => n + r.quantity, 0);
+  const expiryBefore = await get(`/reports/expiry?days=730&locationId=${main.id}`);
+  await post("/sales/checkout", {
+    locationId: main.id,
+    lines: [{ variantId: sock.id, quantity: 3, unitPrice: sock.price }],
+    payments: [{ tender: "method", methodId: cash.id, amount: sock.price * 3 }],
+  });
+  const expiryAfter = await get(`/reports/expiry?days=730&locationId=${main.id}`);
+  eq("earliest batch sold first", expiryQty(expiryAfter, soon), expiryQty(expiryBefore, soon) - 3);
+  eq("later batch untouched", expiryQty(expiryAfter, later), expiryQty(expiryBefore, later));
+
   step("Reconciliation");
   const tb = await get("/reports/trial-balance");
   eq("trial balance debits = credits", tb.totalDebit, tb.totalCredit);
@@ -343,6 +385,125 @@ async function main() {
   check("P&L computed", typeof pnl.netProfit === "number", pnl);
   const dash = await get("/reports/dashboard");
   check("dashboard computed", typeof dash.today.netSales === "number");
+
+  step("Depreciation reduces profit and keeps the balance sheet balanced");
+  const pnlBefore = await get("/reports/profit-loss");
+  await post("/accounting/depreciation", { date: daysFromNow(0), amount: 50_000, memo: "Shop fridges" });
+  const pnlAfter = await get("/reports/profit-loss");
+  eq("depreciation expense reduces net profit", pnlBefore.netProfit - pnlAfter.netProfit, 50_000);
+  const bsAfter = await get("/reports/balance-sheet");
+  eq("balance sheet still balances after depreciation", bsAfter.totalAssets, bsAfter.totalLiabilitiesAndEquity);
+  const accts2 = await get("/accounting/accounts");
+  eq("accumulated depreciation is a credit", accts2.find((a) => a.code === "1510")?.balance, -50_000);
+
+  step("Bank reconciliation: clear the cash account to its statement balance");
+  const cashAcct = accts2.find((a) => a.code === "1000");
+  const recon = await get(`/accounting/reconciliation?accountId=${cashAcct.id}&statementDate=${daysFromNow(0)}`);
+  const statementTotal = recon.clearedBalance + recon.uncleared.reduce((s, l) => s + l.amount, 0);
+  check("uncleared cash lines listed", recon.uncleared.length > 0, recon.uncleared.length);
+  const wrong = await call(
+    "POST",
+    "/accounting/reconciliations",
+    { accountId: cashAcct.id, statementDate: daysFromNow(0), statementBalance: statementTotal + 1, lineIds: recon.uncleared.map((l) => l.lineId) },
+    { expectError: true },
+  );
+  check("reconciliation refuses a balance that doesn't match", !!wrong?.error);
+  await post("/accounting/reconciliations", {
+    accountId: cashAcct.id,
+    statementDate: daysFromNow(0),
+    statementBalance: statementTotal,
+    lineIds: recon.uncleared.map((l) => l.lineId),
+  });
+  const reconAfter = await get(`/accounting/reconciliation?accountId=${cashAcct.id}&statementDate=${daysFromNow(0)}`);
+  eq("nothing left uncleared", reconAfter.uncleared.length, 0);
+  eq("cleared balance = statement", reconAfter.clearedBalance, statementTotal);
+
+  step("Period close: locked dates reject postings and reopen again");
+  await put("/accounting/books-lock", { closedThrough: daysFromNow(-1) });
+  const locked = await call(
+    "POST",
+    "/accounting/journals",
+    {
+      date: daysFromNow(-1),
+      memo: "Late entry",
+      lines: [
+        { accountId: cashAcct.id, debit: 100 },
+        { accountId: accts2.find((a) => a.code === "6200").id, credit: 100 },
+      ],
+    },
+    { expectError: true },
+  );
+  check("posting into a closed period is refused", !!locked?.error, locked);
+  const lockedToday = await put("/accounting/books-lock", { closedThrough: daysFromNow(0) }).catch((e) => e);
+  check("cannot close through today", lockedToday instanceof Error);
+  await put("/accounting/books-lock", { closedThrough: null });
+  const reopened = await get("/settings/business");
+  eq("books reopened", reopened.booksClosedThrough, null);
+
+  step("Fixed assets: register, straight-line depreciation runs are idempotent");
+  const accts3 = await get("/accounting/accounts");
+  const acctId = (code) => accts3.find((a) => a.code === code).id;
+  const asset = await post("/accounting/fixed-assets", {
+    name: "Chiller",
+    accountId: acctId("1500"),
+    paidFromAccountId: acctId("1010"),
+    acquiredOn: daysFromNow(-60),
+    cost: 120_000,
+    salvage: 0,
+    usefulLifeMonths: 12,
+  });
+  eq("asset monthly charge = cost / life", asset.monthlyCharge, 10_000);
+  const run1 = await post("/accounting/fixed-assets/depreciate", { throughDate: daysFromNow(0) });
+  check("first run posts depreciation", run1.amount > 0 && run1.amount <= 120_000, run1);
+  const run2 = await post("/accounting/fixed-assets/depreciate", { throughDate: daysFromNow(0) });
+  eq("second run for the same date posts nothing", run2.amount, 0);
+  const register = await get("/accounting/fixed-assets");
+  const reg = register.rows.find((r) => r.id === asset.id);
+  eq("net book value = cost − accumulated", reg.netBookValue, 120_000 - reg.accumulated);
+  const bs3 = await get("/reports/balance-sheet");
+  eq("balance sheet balances after depreciation runs", bs3.totalAssets, bs3.totalLiabilitiesAndEquity);
+
+  step("Cash flow: activities explain the change in cash");
+  const cf = await get(`/reports/cash-flow?from=${daysFromNow(-90)}&to=${daysFromNow(0)}`);
+  eq("activities net to change in cash", cf.netChange, cf.totalClosing - cf.totalOpening);
+  eq("chiller purchase is investing", cf.activities.investing.total, -120_000);
+
+  step("Bank statement: import, auto-match, reconcile, undo, and reconciled entries can't be reversed");
+  const cashId = acctId("1000");
+  const interest = await post("/accounting/journals", {
+    date: daysFromNow(0),
+    memo: "Bank interest credited",
+    lines: [
+      { accountId: cashId, debit: 2_500 },
+      { accountId: acctId("4100"), credit: 2_500 },
+    ],
+  });
+  const clearedBefore = await get(`/accounting/reconciliation?accountId=${cashId}&statementDate=${daysFromNow(0)}`);
+  await post("/accounting/bank-statements", {
+    accountId: cashId,
+    rows: [
+      { date: daysFromNow(0), description: "CR INTEREST", amount: 2_500 },
+      { date: daysFromNow(0), description: "BANK CHARGE", amount: -75 },
+    ],
+  });
+  const m = await post("/accounting/bank-statements/match", { accountId: cashId });
+  eq("one statement line matches the book", m.matched, 1);
+  eq("the bank charge stays unmatched", m.unmatched, 1);
+  const pre = await get(`/accounting/reconciliation?accountId=${cashId}&statementDate=${daysFromNow(0)}`);
+  const matchedLines = pre.uncleared.filter((l) => l.matched);
+  eq("matched line is flagged", matchedLines.length, 1);
+  const rec = await post("/accounting/reconciliations", {
+    accountId: cashId,
+    statementDate: daysFromNow(0),
+    statementBalance: clearedBefore.clearedBalance + 2_500,
+    lineIds: matchedLines.map((l) => l.lineId),
+  }).catch((e) => ({ error: e.message }));
+  check("reconcile with the matched line", !rec.error, rec);
+  const blocked = await call("POST", `/accounting/journals/${interest.id}/reverse`, {}, { expectError: true });
+  check("reversing a reconciled entry is refused", !!blocked?.error, blocked);
+  await call("DELETE", `/accounting/reconciliations/${rec.id}`);
+  const undone = await get(`/accounting/reconciliation?accountId=${cashId}&statementDate=${daysFromNow(0)}`);
+  check("undo releases the entry for clearing again", undone.uncleared.some((l) => l.lineId === matchedLines[0].lineId));
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   process.exit(failures ? 1 : 0);

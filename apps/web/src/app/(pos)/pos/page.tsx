@@ -29,6 +29,7 @@ import type {
   SellableItem,
   Shift,
 } from "@shopbooks/shared";
+import { promoLabel } from "@shopbooks/shared";
 import { Brand } from "@/components/layout/brand";
 import { LocationSwitcher, ThemeToggle, UserMenu } from "@/components/layout/topbar";
 import { usePageTitle } from "@/components/page-header";
@@ -50,6 +51,8 @@ import {
   repriceForTier,
   returnCredit,
   settlement,
+  tierPrice,
+  unitPriceFor,
   type CartLine,
   type CartState,
   type ReturnSelection,
@@ -172,6 +175,7 @@ function PointOfSale() {
               listPrice: l.unitPrice,
               retailPrice: l.unitPrice,
               wholesalePrice: null,
+              promotion: null,
               discountType: l.discountType,
               discountValue: l.discountValue,
               taxRate: l.taxRate,
@@ -737,7 +741,8 @@ function CategoryChip({ on, onClick, children, color }: { on: boolean; onClick: 
 
 function ProductTile({ item, tier, onClick, inCart }: { item: SellableItem; tier: "retail" | "wholesale"; onClick: () => void; inCart: number }) {
   const money = useMoney();
-  const price = tier === "wholesale" && item.wholesalePrice != null ? item.wholesalePrice : item.price;
+  const base = tierPrice(item.price, item.wholesalePrice, tier);
+  const price = unitPriceFor(item, tier);
   const out = item.trackInventory && item.stock <= 0;
   return (
     <button
@@ -757,6 +762,11 @@ function ProductTile({ item, tier, onClick, inCart }: { item: SellableItem; tier
             {item.productName.slice(0, 1).toUpperCase()}
           </span>
         )}
+        {item.promotion && (
+          <span className="absolute top-2 left-2 rounded-full bg-success px-2 py-0.5 text-[10.5px] font-semibold text-white shadow">
+            {promoLabel(item.promotion, (m) => money.format(m))}
+          </span>
+        )}
         {inCart > 0 && (
           <span className="absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-ink px-1.5 text-xs font-semibold text-ink-foreground shadow">
             {formatQty(inCart)}
@@ -767,7 +777,10 @@ function ProductTile({ item, tier, onClick, inCart }: { item: SellableItem; tier
         <p className="line-clamp-2 text-[13px] leading-snug font-medium">{item.productName}</p>
         {item.variantName && <p className="truncate text-[11.5px] text-muted-foreground">{item.variantName}</p>}
         <div className="mt-auto flex items-end justify-between gap-2 pt-1">
-          <span className="num text-sm font-semibold">{money.format(price)}</span>
+          <span className="flex items-baseline gap-1.5">
+            <span className="num text-sm font-semibold">{money.format(price)}</span>
+            {price !== base && <span className="num text-[11px] text-muted-foreground line-through">{money.format(base)}</span>}
+          </span>
           {item.trackInventory && (
             <span className={cn("num text-[11px]", out ? "text-destructive" : "text-muted-foreground")}>{out ? "Out" : formatQty(item.stock)}</span>
           )}

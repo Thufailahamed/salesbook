@@ -160,6 +160,7 @@ function PurchaseView() {
                       </Link>
                       <p className="text-xs text-muted-foreground">
                         {l.sku}
+                        {l.expiryDate && <span className="font-sans"> · Expires {formatDate(l.expiryDate)}</span>}
                         {l.quantityReturned > 0 && <span className="ml-1 text-warning">· {formatQty(l.quantityReturned)} returned</span>}
                       </p>
                     </TableCell>

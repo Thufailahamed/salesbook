@@ -103,6 +103,7 @@ export async function getPurchaseDto(ctx: Ctx, id: string): Promise<Purchase> {
         tax: l.tax,
         total: l.total,
         landedUnitCost: l.landedUnitCost,
+        expiryDate: l.expiryDate ?? null,
         quantityReturned: l.quantityReturned,
       }),
     ),

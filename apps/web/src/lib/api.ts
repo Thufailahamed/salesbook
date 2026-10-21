@@ -32,7 +32,13 @@ export function buildUrl(path: string, query?: Query): string {
 
 let redirecting = false;
 function handleUnauthorized(path: string) {
-  if (typeof window === "undefined" || path.startsWith("/auth/")) return;
+  if (typeof window === "undefined" || path.startsWith("/auth/") || path === "/platform/auth/login") return;
+  if (path.startsWith("/platform/")) {
+    if (window.location.pathname.startsWith("/admin/login") || redirecting) return;
+    redirecting = true;
+    window.location.href = "/admin/login";
+    return;
+  }
   if (redirecting) return;
   const here = window.location.pathname;
   if (here.startsWith("/login") || here.startsWith("/signup")) return;

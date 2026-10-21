@@ -8,6 +8,7 @@ import {
   products,
   purchaseLines,
   stockLevels,
+  stockLots,
   stockMovements,
   taxRates,
   units,
@@ -484,6 +485,7 @@ export async function updateProduct(ctx: Ctx, productId: string, input: ProductI
     }
     if (drop.length > 0) {
       tx.add(ctx.db.delete(stockLevels).where(inArray(stockLevels.variantId, drop)) as unknown as Stmt);
+      tx.add(ctx.db.delete(stockLots).where(inArray(stockLots.variantId, drop)) as unknown as Stmt);
       tx.add(ctx.db.delete(variants).where(inArray(variants.id, drop)) as unknown as Stmt);
     }
   }
@@ -517,6 +519,7 @@ export async function deleteProduct(ctx: Ctx, productId: string): Promise<"archi
   for (let i = 0; i < ids.length; i += 90) {
     const chunk = ids.slice(i, i + 90);
     tx.add(ctx.db.delete(stockLevels).where(inArray(stockLevels.variantId, chunk)) as unknown as Stmt);
+    tx.add(ctx.db.delete(stockLots).where(inArray(stockLots.variantId, chunk)) as unknown as Stmt);
   }
   tx.add(ctx.db.delete(variants).where(eq(variants.productId, productId)) as unknown as Stmt);
   tx.add(ctx.db.delete(products).where(eq(products.id, productId)) as unknown as Stmt);
