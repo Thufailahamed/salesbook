@@ -43,7 +43,7 @@ All endpoints are under `/api`. Request bodies are validated with the zod schema
 | GET / POST | /units | unitSchema | Unit[] / Unit |
 | PUT / DELETE | /units/:id | | |
 | GET | /products | productListQuerySchema | Paginated<ProductListItem> |
-| GET | /products/sellable | sellableSearchQuerySchema | SellableItem[] |
+| GET | /products/sellable | sellableSearchQuerySchema (`limit` ≤ 200, `offset` pages through the catalog) | SellableItem[] |
 | GET | /products/lookup | `?code=&locationId=` exact barcode/SKU | SellableItem (404 if none) |
 | GET | /products/:id | – | Product |
 | POST | /products | productSchema | Product |
@@ -379,3 +379,39 @@ Plan limits (`maxUsers`, `maxLocations`) are enforced on user/location creation.
 `PAYMENTS_LK_API` (optional env) overrides `https://api.payments.lk/v1` — `scripts/e2e-platform.mjs` points it at a
 local mock. Run it with the API started using the `.dev.vars` shown in the script header; it checks admin auth, plan CRUD,
 paid signup, webhook security/idempotency, plan limits, suspension, expiry + renewal, and the per-shop invoice gateway.
+
+
+## Offline sales
+
+The POS keeps selling with no connection (cash/card-style tenders only; no returns, holds, credit, gift cards or points).
+Sales are queued in the browser (IndexedDB) and replayed to `POST /sales/checkout`.
+
+* `checkoutSchema.clientRef` (8–64 chars, client-generated UUID) is an idempotency key stored on `invoices.client_ref`
+  (unique per business). Re-sending a `clientRef` returns the invoice from the first attempt (`change: 0`) and records
+  nothing new, so a retry after a dropped response never double-posts.
+* A checkout carrying a `clientRef` may set `date` to an earlier day (the day it was rung up) without `pos.backdate`;
+  future dates are ignored. The invoice number is assigned by the server at sync time.
+* Stock/credit problems found at sync time come back as normal 4xx errors; the POS keeps the sale as "failed" for a
+  manager to retry or discard. The sale attaches to whichever register shift is open when it syncs.
+
+
+## Customer messaging (SMS / WhatsApp)
+
+Receipts, payment reminders and "order ready" notes. SMS goes out from the server through the shop's own Notify.lk
+account (`POST` form to `https://app.notify.lk/api/v1/send`; override with `NOTIFY_LK_API` in tests). WhatsApp needs no
+account: the API writes the message and returns a `wa.me` URL that the browser opens; a person presses send.
+Every attempt is stored in `messages` (status `sent` | `opened` | `failed`).
+
+| Method | Path | Perm | Notes |
+|---|---|---|---|
+| GET/PUT | /messaging/settings | settings.manage | provider, Notify.lk credentials (key never returned), country code, pay link, wording. Blank template = built-in text |
+| GET | /messaging/status | messaging.send | `{ smsReady, countryCode }` |
+| GET | /messaging/overdue | messaging.send | customers with an invoice past its due date, with last-reminded time |
+| POST | /messaging/preview | messaging.send | `messageComposeSchema` → `MessagePreview` (final text incl. pay link) |
+| POST | /messaging/send | messaging.send | `messageSendSchema` (`channel` sms/whatsapp, optional edited `body`, optional `phone`) → `MessageSendResult` |
+| POST | /messaging/remind-overdue | messaging.bulk | SMS to many customers; skips no-phone / not-overdue / reminded within `skipRecentHours` (24) → `RemindOverdueResult` |
+| GET | /messaging/log | messaging.send | recent messages, optional `customerId` |
+
+Phone numbers are normalised with the shop's country code (`0771234567` → `94771234567`). The pay link is a payments.lk
+checkout for a receipt with a balance, or for a reminder when the customer has exactly one open invoice; a pending
+checkout for the same invoice and amount created within 24 h is reused. A pay link that can't be created never blocks a message.

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { Building2, CreditCard, Gem, Globe, Hash, MapPin, MoreHorizontal, Pencil, Percent, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Building2, CreditCard, Gem, Globe, Hash, MapPin, MessageSquare, MoreHorizontal, Pencil, Percent, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { GatewaySettings, GatewaySettingsInput, Business, BusinessSettingsInput, Location, LocationInput, PaymentMethod, PaymentMethodInput, Sequence, TaxRate, TaxRateInput } from "@shopbooks/shared";
 import { CURRENCIES, PAYMENT_METHOD_TYPES, PAYMENT_METHOD_TYPE_LABELS, SEQUENCE_DEFAULTS, type PaymentMethodType } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
@@ -24,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { MessagingSettingsTab } from "@/components/messaging-settings";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useApiMutation, useApiQuery } from "@/hooks/use-api";
@@ -55,6 +56,7 @@ function SettingsPage() {
           <TabsTrigger value="taxes"><Percent /> Taxes</TabsTrigger>
           <TabsTrigger value="payments"><CreditCard /> Payment methods</TabsTrigger>
           <TabsTrigger value="online"><Globe /> Online payments</TabsTrigger>
+          <TabsTrigger value="messaging"><MessageSquare /> Messaging</TabsTrigger>
           <TabsTrigger value="billing"><Gem /> Subscription</TabsTrigger>
           <TabsTrigger value="numbering"><Hash /> Numbering</TabsTrigger>
           <TabsTrigger value="ai"><Sparkles /> AI features</TabsTrigger>
@@ -64,6 +66,7 @@ function SettingsPage() {
         <TabsContent value="taxes"><TaxesTab /></TabsContent>
         <TabsContent value="payments"><PaymentMethodsTab /></TabsContent>
         <TabsContent value="online"><OnlinePaymentsTab /></TabsContent>
+        <TabsContent value="messaging"><MessagingSettingsTab /></TabsContent>
         <TabsContent value="billing"><BillingPanel canManage={can("settings.manage")} /></TabsContent>
         <TabsContent value="numbering"><NumberingTab /></TabsContent>
         <TabsContent value="ai"><AiFeaturesTab /></TabsContent>

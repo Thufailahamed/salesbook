@@ -11,6 +11,8 @@ import { Kbd } from "@/components/ui/kbd";
 import { Command as CommandPrimitive } from "cmdk";
 import { useApiQuery } from "@/hooks/use-api";
 import { useDebounce } from "@/hooks/use-debounce";
+import { useCatalog, useOnline } from "@/hooks/use-offline";
+import { findByCode, searchCatalog } from "@/lib/offline-catalog";
 import { useMoney } from "@/hooks/use-money";
 import { useOptionalSession } from "@/hooks/use-session";
 import { ApiError, api, assetUrl } from "@/lib/api";
@@ -71,16 +73,22 @@ export const VariantPicker = React.forwardRef<HTMLInputElement, VariantPickerPro
   React.useImperativeHandle(ref, () => inputRef.current as HTMLInputElement);
   const dq = useDebounce(query.trim(), 200);
 
+  // Offline: search the copy of the catalog saved on this device instead of the server.
+  const online = useOnline();
+  const catalog = useCatalog(session?.business.id, loc);
   const results = useApiQuery<SellableItem[]>(
-    dq ? "/products/sellable" : null,
+    dq && online ? "/products/sellable" : null,
     { q: dq, locationId: loc, limit: 30, includeServices },
     { staleTime: 10_000 },
   );
-  const items = results.data ?? [];
+  const items = React.useMemo(
+    () => (online ? results.data ?? [] : dq && catalog ? searchCatalog(catalog.items, dq, { limit: 30, includeServices }) : []),
+    [online, results.data, dq, catalog, includeServices],
+  );
   const aiStatus = useApiQuery<AiStatus>("/ai/status", undefined, { staleTime: Infinity });
   // Only when the normal search found nothing: ask the AI for the closest products.
   const closest = useApiQuery<SellableItem[]>(
-    dq.length >= 2 && !results.isFetching && items.length === 0 && aiStatus.data?.productSearch ? "/ai/product-search" : null,
+    online && dq.length >= 2 && !results.isFetching && items.length === 0 && aiStatus.data?.productSearch ? "/ai/product-search" : null,
     { q: dq, locationId: loc },
     { staleTime: 60_000 },
   );
@@ -94,6 +102,16 @@ export const VariantPicker = React.forwardRef<HTMLInputElement, VariantPickerPro
   };
 
   const lookup = async (code: string) => {
+    if (!online) {
+      const hit = catalog ? findByCode(catalog.items, code) : null;
+      if (hit) pick(hit);
+      else if (onNotFound) {
+        onNotFound(code);
+        setQuery("");
+        setOpen(false);
+      } else toast.error(catalog ? `No product found for “${code}”` : "No saved catalog on this device yet. Connect once to download it.");
+      return;
+    }
     setLooking(true);
     try {
       const item = await api.get<SellableItem>("/products/lookup", { code, locationId: loc });

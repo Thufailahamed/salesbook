@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from "@shopbooks/shared";
+import { reportNetwork } from "@/lib/connectivity";
 
 export const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 export const API_BASE = `${API_ORIGIN}/api`;
@@ -65,9 +66,11 @@ async function request<T>(
   try {
     res = await fetch(buildUrl(path, opts.query), { method, headers, body, credentials: "include" });
   } catch {
+    reportNetwork(false);
     throw new ApiError(0, "network_error", "Cannot reach the server. Check your connection and try again.");
   }
 
+  reportNetwork(true);
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();

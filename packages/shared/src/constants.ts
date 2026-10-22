@@ -44,6 +44,8 @@ export const PERMISSIONS = {
   "customers.view": ALL,
   "customers.manage": ["owner", "admin", "manager", "cashier"],
   "customers.payments": ALL,
+  "messaging.send": ["owner", "admin", "manager", "accountant", "cashier"],
+  "messaging.bulk": ["owner", "admin", "manager", "accountant"],
   "suppliers.view": ["owner", "admin", "manager", "accountant"],
   "suppliers.manage": ["owner", "admin", "manager", "accountant"],
   "purchases.view": ["owner", "admin", "manager", "accountant"],
@@ -436,3 +438,31 @@ export const AI_FEATURES = [
   "salesReview",
 ] as const;
 export type AiFeature = (typeof AI_FEATURES)[number];
+
+
+// ---------------------------------------------------------------- customer messaging
+
+export const MESSAGE_KINDS = ["receipt", "reminder", "order_ready"] as const;
+export type MessageKind = (typeof MESSAGE_KINDS)[number];
+export const MESSAGE_CHANNELS = ["sms", "whatsapp"] as const;
+export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
+export const SMS_PROVIDERS = ["none", "notify_lk"] as const;
+export type SmsProvider = (typeof SMS_PROVIDERS)[number];
+
+export const MESSAGE_KIND_LABELS: Record<MessageKind, string> = {
+  receipt: "Receipt",
+  reminder: "Payment reminder",
+  order_ready: "Order ready",
+};
+
+/**
+ * Message wording. `{name}` placeholders are filled in by the server:
+ * {customer} {shop} {invoice} {date} {total} {paid} {amount} {count} {oldest} {balance_line} {link_line} {invoice_part}.
+ * The *_line / *_part ones are empty when they don't apply.
+ */
+export const DEFAULT_MESSAGE_TEMPLATES: Record<MessageKind, string> = {
+  receipt: "Hi {customer}, thank you for shopping at {shop}. Receipt {invoice} ({date}): total {total}, paid {paid}.{balance_line}{link_line}",
+  reminder:
+    "Hi {customer}, a friendly reminder from {shop}: {amount} is outstanding ({count}, oldest {oldest}).{link_line} Please settle it when you can. Thank you!",
+  order_ready: "Hi {customer}, your order{invoice_part} at {shop} is ready for pickup. Thank you!",
+};

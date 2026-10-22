@@ -6,6 +6,8 @@ import {
   AI_FEATURES,
   CASH_MOVEMENT_TYPES,
   CUSTOMER_TYPES,
+  MESSAGE_CHANNELS,
+  MESSAGE_KINDS,
   PAYMENT_METHOD_TYPES,
   PRICE_TIERS,
   PRODUCT_TYPES,
@@ -13,6 +15,7 @@ import {
   QUOTATION_STATUSES,
   REFUND_MODES,
   ROLES,
+  SMS_PROVIDERS,
 } from "./constants";
 
 /*
@@ -252,6 +255,8 @@ export const sellableSearchQuerySchema = z.object({
   locationId: z.string().optional(),
   categoryId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(40),
+  /** Skip this many results (page through the whole catalog, e.g. to cache it for offline use) */
+  offset: z.coerce.number().int().min(0).default(0),
   /** Include variants of service products / non-tracked items (default true) */
   includeServices: z.coerce.boolean().optional(),
 });
@@ -459,6 +464,12 @@ export const checkoutSchema = z
     refund: refundSchema.nullish(),
     quotationId: z.string().nullish(),
     heldSaleId: z.string().nullish(),
+    /**
+     * Client-generated unique id. Sending the same one twice returns the invoice created the first time, so an
+     * offline sale that is retried after a dropped connection is never recorded twice. A sale carrying one may also
+     * be dated earlier than today (it was rung up offline and synced later).
+     */
+    clientRef: z.string().trim().min(8).max(64).optional(),
   })
   .refine((c) => c.lines.length > 0 || !!c.returnFrom, { message: "Add at least one item" });
 export type CheckoutInput = z.infer<typeof checkoutSchema>;
@@ -920,3 +931,47 @@ export const aiSettingsSchema = z.object({
   features: z.object(Object.fromEntries(AI_FEATURES.map((k) => [k, z.boolean().optional()]))),
 });
 export type AiSettingsInput = z.infer<typeof aiSettingsSchema>;
+
+
+// ---------------------------------------------------------------- customer messaging
+
+export const messageSettingsSchema = z.object({
+  smsProvider: z.enum(SMS_PROVIDERS),
+  /** Notify.lk user id */
+  notifyUserId: z.string().trim().max(100).nullish(),
+  /** Omit (or send empty) to keep the stored key. */
+  notifyApiKey: z.string().trim().max(200).nullish(),
+  senderId: z.string().trim().max(11, "Sender ID is at most 11 characters").nullish(),
+  /** Dial code added to numbers saved without one (94 = Sri Lanka). */
+  countryCode: z.string().trim().regex(/^\d{1,4}$/, "Digits only, e.g. 94"),
+  includePayLink: z.boolean(),
+  /** Blank = use the built-in wording. */
+  receiptTemplate: z.string().trim().max(600).nullish(),
+  reminderTemplate: z.string().trim().max(600).nullish(),
+  readyTemplate: z.string().trim().max(600).nullish(),
+});
+export type MessageSettingsInput = z.infer<typeof messageSettingsSchema>;
+
+export const messageComposeSchema = z.object({
+  kind: z.enum(MESSAGE_KINDS),
+  customerId: z.string().nullish(),
+  /** Receipts and "order ready" refer to an invoice; reminders to all of the customer's open ones. */
+  invoiceId: z.string().nullish(),
+  /** Number to use when the customer has none saved (walk-in receipts). */
+  phone: z.string().trim().max(30).nullish(),
+});
+export type MessageComposeInput = z.infer<typeof messageComposeSchema>;
+
+export const messageSendSchema = messageComposeSchema.extend({
+  channel: z.enum(MESSAGE_CHANNELS),
+  /** Edited wording; omit to send the generated text. */
+  body: z.string().trim().min(1).max(1000).optional(),
+});
+export type MessageSendInput = z.infer<typeof messageSendSchema>;
+
+export const remindOverdueSchema = z.object({
+  customerIds: z.array(zId).min(1).max(100),
+  /** Customers already reminded within this many hours are skipped (stops a double click texting people twice). */
+  skipRecentHours: z.number().int().min(0).max(720).default(24),
+});
+export type RemindOverdueInput = z.infer<typeof remindOverdueSchema>;

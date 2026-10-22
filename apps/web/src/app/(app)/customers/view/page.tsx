@@ -16,6 +16,7 @@ import {
   Sparkles,
   Star,
   WalletCards,
+  MessageCircle,
 } from "lucide-react";
 import type { AiStatus, Customer, Invoice, Paginated, Payment, SaleReturn } from "@shopbooks/shared";
 import { TENDER_LABELS } from "@shopbooks/shared";
@@ -31,6 +32,7 @@ import { PaymentStatusBadge, ActiveBadge, StatusBadge } from "@/components/statu
 import { StatementCard } from "@/components/statement-card";
 import { useConfirm } from "@/components/confirm-dialog";
 import { ApplyCreditDialog, CreditRefundDialog, CustomerFormDialog, PartyPaymentDialog } from "@/components/party-dialogs";
+import { SendMessageDialog } from "@/components/send-message-dialog";
 import { ReminderDraftDialog } from "@/components/reminder-draft-dialog";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -69,6 +71,7 @@ function CustomerView() {
   const [applyOpen, setApplyOpen] = React.useState(false);
   const [refundOpen, setRefundOpen] = React.useState(false);
   const [reminderOpen, setReminderOpen] = React.useState(false);
+  const [messageOpen, setMessageOpen] = React.useState(false);
   const aiStatus = useApiQuery<AiStatus>("/ai/status", undefined, { staleTime: Infinity });
 
   const setActive = useApiMutation(
@@ -117,6 +120,11 @@ function CustomerView() {
                 <Link href={`/pos?customerId=${c.id}`}>
                   <ShoppingCart /> New sale
                 </Link>
+              </Button>
+            )}
+            {can("messaging.send") && c.dueBalance > 0 && (
+              <Button variant="outline" onClick={() => setMessageOpen(true)}>
+                <MessageCircle /> Send reminder
               </Button>
             )}
             {aiStatus.data?.reminderDraft && c.dueBalance > 0 && (
@@ -283,6 +291,7 @@ function CustomerView() {
       <PartyPaymentDialog open={payOpen} onOpenChange={setPayOpen} kind="customer" partyId={c.id} partyName={c.name} balance={c.dueBalance} />
       <ApplyCreditDialog open={applyOpen} onOpenChange={setApplyOpen} kind="customer" partyId={c.id} credit={c.creditBalance} />
       <CreditRefundDialog open={refundOpen} onOpenChange={setRefundOpen} kind="customer" partyId={c.id} credit={c.creditBalance} />
+      <SendMessageDialog open={messageOpen} onOpenChange={setMessageOpen} kind="reminder" customerId={c.id} />
       <ReminderDraftDialog open={reminderOpen} onOpenChange={setReminderOpen} kind="customer" partyId={c.id} />
     </>
   );

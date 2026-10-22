@@ -4,7 +4,10 @@
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:web"],
+      "runtimeArgs": [
+        "run",
+        "dev:web"
+      ],
       "port": 3000
     }
   ]

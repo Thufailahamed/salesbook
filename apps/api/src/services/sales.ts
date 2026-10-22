@@ -111,7 +111,17 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
   const hasSale = input.lines.length > 0;
   if (hasSale) ctx.require("pos.sell");
   if (input.returnFrom) ctx.require("sales.return");
-  const date = docDate(ctx, input.date);
+  // A retried offline sale: hand back the invoice from the first attempt instead of recording it twice.
+  if (input.clientRef) {
+    const [dup] = await ctx.db
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(and(eq(invoices.businessId, ctx.businessId), eq(invoices.clientRef, input.clientRef)))
+      .limit(1);
+    if (dup) return { invoice: await getInvoiceDto(ctx, dup.id), saleReturn: null, change: 0, refunded: 0 };
+  }
+  // Offline sales are synced later, so they keep the day they were rung up (never a future day).
+  const date = input.clientRef && input.date && input.date < ctx.today ? input.date : docDate(ctx, input.date);
   const location = await getLocation(ctx, input.locationId);
   const biz = ctx.business;
 
@@ -372,6 +382,7 @@ export async function checkout(ctx: Ctx, input: CheckoutInput): Promise<Checkout
         note: input.note ?? null,
         quotationId: input.quotationId ?? null,
         exchangeReturnId: appliedToExchange > 0 ? returnId : null,
+        clientRef: input.clientRef ?? null,
         createdBy: ctx.userId,
         createdAt: ctx.now,
       }) as unknown as Stmt,

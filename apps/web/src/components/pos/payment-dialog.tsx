@@ -57,6 +57,7 @@ export function PaymentDialog({
   customer,
   summary,
   pending,
+  offline,
   onComplete,
 }: {
   open: boolean;
@@ -69,6 +70,8 @@ export function PaymentDialog({
   /** Lines shown above the amount (exchange credit etc.) */
   summary?: { label: string; value: number }[];
   pending?: boolean;
+  /** No connection: only methods the till can settle on its own (no store credit, gift cards, points or sales on account). */
+  offline?: boolean;
   onComplete: (r: PaymentResult) => void;
 }) {
   const { paymentMethods, business } = useSession();
@@ -101,7 +104,7 @@ export function PaymentDialog({
   const pointsUsed = tenders.filter((t) => t.input.tender === "loyalty").reduce((s, t) => s + (t.input.points ?? 0), 0);
   const storeCreditLeft = Math.max(0, (customer?.creditBalance ?? 0) - storeCreditUsed);
   const pointsLeft = Math.max(0, (customer?.loyaltyPoints ?? 0) - pointsUsed);
-  const loyaltyOn = business.loyaltyEnabled && business.loyaltyPointValue > 0 && !!customer && pointsLeft >= Math.max(1, business.loyaltyMinRedeem);
+  const loyaltyOn = !offline && business.loyaltyEnabled && business.loyaltyPointValue > 0 && !!customer && pointsLeft >= Math.max(1, business.loyaltyMinRedeem);
 
   // reset when opened
   React.useEffect(() => {
@@ -210,7 +213,7 @@ export function PaymentDialog({
   const all = entry && remaining > 0 ? [...tenders, entry] : tenders;
   const totalPaid = all.reduce((s, t) => s + t.input.amount, 0);
   const balance = Math.max(0, amountDue - totalPaid);
-  const canCredit = !!customer && customer.allowCredit;
+  const canCredit = !offline && !!customer && customer.allowCredit;
   const creditRoom = customer && customer.creditLimit > 0 ? customer.creditLimit - customer.dueBalance : Infinity;
   const needsCredit = balance > 0;
   const creditOk = !needsCredit || (onAccount && canCredit && balance <= creditRoom);
@@ -316,14 +319,16 @@ export function PaymentDialog({
                       </TenderButton>
                     );
                   })}
-                  {storeCreditLeft > 0 && (
+                  {!offline && storeCreditLeft > 0 && (
                     <TenderButton on={active?.kind === "store_credit"} onClick={() => choose({ kind: "store_credit" })}>
                       <WalletCards className="size-4" /> Store credit
                     </TenderButton>
                   )}
-                  <TenderButton on={active?.kind === "gift_card"} onClick={() => choose({ kind: "gift_card" })}>
-                    <Gift className="size-4" /> Gift card
-                  </TenderButton>
+                  {!offline && (
+                    <TenderButton on={active?.kind === "gift_card"} onClick={() => choose({ kind: "gift_card" })}>
+                      <Gift className="size-4" /> Gift card
+                    </TenderButton>
+                  )}
                   {loyaltyOn && (
                     <TenderButton on={active?.kind === "loyalty"} onClick={() => choose({ kind: "loyalty" })}>
                       <Star className="size-4" /> Points

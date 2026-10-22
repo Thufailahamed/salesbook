@@ -9,6 +9,8 @@ export interface Env {
   /** Bootstrap platform admin: created on first successful login with these credentials (set as secrets). */
   /** Override the payments.lk API base (tests / sandbox proxies). Defaults to https://api.payments.lk/v1 */
   PAYMENTS_LK_API?: string;
+  /** Override the Notify.lk send endpoint (tests). Defaults to https://app.notify.lk/api/v1/send */
+  NOTIFY_LK_API?: string;
   PLATFORM_ADMIN_EMAIL?: string;
   PLATFORM_ADMIN_PASSWORD?: string;
   /** Workers AI binding; its calls are routed through AI_GATEWAY_ID. */

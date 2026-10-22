@@ -487,10 +487,13 @@ export const invoices = sqliteTable(
     voidReason: text("void_reason"),
     voidedAt: integer("voided_at"),
     voidedBy: text("voided_by"),
+    /** Idempotency key from the POS (offline sales are retried until acknowledged) */
+    clientRef: text("client_ref"),
     createdBy: text("created_by"),
     createdAt: createdAt(),
   },
   (t) => [
+    uniqueIndex("invoices_client_ref_uq").on(t.businessId, t.clientRef),
     uniqueIndex("invoices_number_uq").on(t.businessId, t.number),
     index("invoices_date_idx").on(t.businessId, t.date),
     index("invoices_customer_idx").on(t.businessId, t.customerId, t.date),
@@ -1104,6 +1107,52 @@ export const gatewayCheckouts = sqliteTable(
     paidAt: integer("paid_at"),
   },
   (t) => [index("gateway_checkouts_doc_idx").on(t.businessId, t.docType, t.docId)],
+);
+
+// ---------------------------------------------------------------- customer messaging (SMS / WhatsApp)
+
+export const messageSettings = sqliteTable("message_settings", {
+  businessId: text("business_id").primaryKey(),
+  /** none | notify_lk */
+  smsProvider: text("sms_provider").notNull().default("none"),
+  notifyUserId: text("notify_user_id"),
+  /** Notify.lk API key. Never returned to the client. */
+  notifyApiKey: text("notify_api_key"),
+  senderId: text("sender_id"),
+  /** Dial code prepended to local numbers (94 = Sri Lanka). */
+  countryCode: text("country_code").notNull().default("94"),
+  includePayLink: bool("include_pay_link", true),
+  receiptTemplate: text("receipt_template"),
+  reminderTemplate: text("reminder_template"),
+  readyTemplate: text("ready_template"),
+  updatedAt: integer("updated_at").notNull().default(0),
+});
+
+export const messages = sqliteTable(
+  "messages",
+  {
+    id: id(),
+    businessId: businessId(),
+    /** receipt | reminder | order_ready */
+    kind: text("kind").notNull(),
+    /** sms | whatsapp */
+    channel: text("channel").notNull(),
+    customerId: text("customer_id"),
+    docType: text("doc_type"),
+    docId: text("doc_id"),
+    toPhone: text("to_phone").notNull(),
+    body: text("body").notNull(),
+    /** sent | opened | failed */
+    status: text("status").notNull(),
+    error: text("error"),
+    providerRef: text("provider_ref"),
+    createdBy: text("created_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("messages_customer_idx").on(t.businessId, t.customerId, t.createdAt),
+    index("messages_business_idx").on(t.businessId, t.createdAt),
+  ],
 );
 
 // ---------------------------------------------------------------- platform (super admin, plans, subscriptions)

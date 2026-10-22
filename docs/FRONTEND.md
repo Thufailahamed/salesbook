@@ -280,3 +280,26 @@ Dark mode is automatic — use tokens, never raw colours (except inside print do
   payments.lk checkout; `/signup/complete?order=` polls until the webhook has created the shop.
 * Shops see **Settings → Subscription** (`components/billing-panel.tsx`) and a renew banner (≤7 days); an expired shop's
   app shell is replaced by the same panel.
+
+
+## Offline POS
+
+* `public/sw.js` (registered by `lib/offline-sw.ts`, production builds only) caches the app shell and `/pos` so the
+  till opens with no connection. It never caches `/api/*` except product images. Bump `VERSION` in it to reset caches.
+* `lib/offline-db.ts`: IndexedDB `kv` (cached `/auth/me`, catalog per location, last shift) + `outbox` of queued sales.
+  `AuthGuard` falls back to the cached `/auth/me` on a network error; logout clears the cache (not the outbox).
+* `lib/connectivity.ts` + `useOnline()`: navigator.onLine AND last request reached the server (pings `/health` while down).
+* `lib/offline-catalog.ts` + `useCatalog()`: the whole sellable catalog (paged by `offset`), refreshed every 10 min;
+  `VariantPicker` and the POS grid search it locally when offline.
+* `<OfflineRunner/>` (mounted in `AuthGuard`) syncs the outbox when online, keeps the catalog fresh and registers the
+  worker. `<OfflineStatus/>` is the POS header pill + queue dialog (retry/discard failed sales).
+* POS: `checkout` falls back to `queueSale()` on a network error or when `!online`; the payment dialog takes `offline`.
+
+
+## Customer messaging
+
+* `<SendMessageDialog kind customerId invoiceId />` (`components/send-message-dialog.tsx`): previews the server-written text,
+  lets the user edit it, then "Send SMS" or "WhatsApp" (opens `wa.me` in a tab opened synchronously inside the click).
+  Used from the POS sale-complete dialog, invoice view (Message menu), customer view, and the reminders page.
+* `/customers/reminders`: overdue customers, one-tap "Remind N by SMS" (needs `messaging.bulk`) and a WhatsApp queue that opens one chat per click.
+* Settings → Messaging (`components/messaging-settings.tsx`): Notify.lk account, country code, pay link toggle, message wording.

@@ -10,6 +10,8 @@ import type {
   GiftCardStatus,
   InvoiceKind,
   InvoiceStatus,
+  MessageChannel,
+  MessageKind,
   PartyType,
   PaymentDirection,
   PaymentMethodType,
@@ -25,6 +27,7 @@ import type {
   Role,
   SequenceKey,
   ShiftStatus,
+  SmsProvider,
   StockMovementType,
   Tender,
 } from "./constants";
@@ -1670,4 +1673,74 @@ export interface SalesReview {
   flags: SalesReviewFlag[];
   /** Short note from the model, or null when the AI note is off or unavailable */
   summary: string | null;
+}
+
+
+// ---------------------------------------------------------------- customer messaging
+
+export interface MessageSettings {
+  smsProvider: SmsProvider;
+  notifyUserId: string | null;
+  hasApiKey: boolean;
+  senderId: string | null;
+  countryCode: string;
+  includePayLink: boolean;
+  /** Wording in effect (the built-in text when none is saved) */
+  templates: Record<MessageKind, string>;
+  /** True when texts can really be sent from the server */
+  smsReady: boolean;
+  /** True when a payments.lk link can be added to reminders and receipts */
+  payLinkAvailable: boolean;
+}
+
+export interface MessageStatus {
+  smsReady: boolean;
+  countryCode: string;
+}
+
+export interface MessagePreview {
+  kind: MessageKind;
+  customerId: string | null;
+  customerName: string | null;
+  /** Digits with country code, or null when there is no usable number */
+  phone: string | null;
+  body: string;
+}
+
+export interface MessageLogEntry {
+  id: string;
+  kind: MessageKind;
+  channel: MessageChannel;
+  customerId: string | null;
+  customerName: string | null;
+  toPhone: string;
+  body: string;
+  /** sent (SMS accepted by the provider) | opened (WhatsApp chat opened) | failed */
+  status: "sent" | "opened" | "failed";
+  error: string | null;
+  createdAt: number;
+  createdByName: string | null;
+}
+
+export interface MessageSendResult {
+  message: MessageLogEntry;
+  /** WhatsApp: open this to send the (already written) message */
+  whatsappUrl: string | null;
+}
+
+export interface OverdueCustomer {
+  customerId: string;
+  name: string;
+  phone: string | null;
+  totalDue: number;
+  overdueDue: number;
+  invoiceCount: number;
+  oldestDaysOverdue: number;
+  lastRemindedAt: number | null;
+}
+
+export interface RemindOverdueResult {
+  sent: number;
+  failed: { customerId: string; name: string; error: string }[];
+  skipped: { customerId: string; name: string; reason: string }[];
 }

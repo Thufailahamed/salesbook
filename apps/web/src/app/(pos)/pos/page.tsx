@@ -83,7 +83,12 @@ import { useHotkeys } from "@/hooks/use-hotkeys";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useMoney } from "@/hooks/use-money";
 import { useSession } from "@/hooks/use-session";
-import { api, assetUrl } from "@/lib/api";
+import { ApiError, api, assetUrl } from "@/lib/api";
+import { useCatalog, useOnline } from "@/hooks/use-offline";
+import { OfflineStatus } from "@/components/offline/offline-status";
+import { OfflineSaleDialog } from "@/components/offline/offline-sale-dialog";
+import { reduceCatalogStock, searchCatalog } from "@/lib/offline-catalog";
+import { kvGet, kvSet, outboxPut, type OutboxSale } from "@/lib/offline-db";
 import { cn, formatQty, formatTime } from "@/lib/utils";
 
 const INVALIDATE = [
@@ -115,7 +120,7 @@ function PointOfSale() {
   const confirm = useConfirm();
   const money = useMoney();
   const today = useBusinessToday();
-  const { business, user, can, locationId, location } = useSession();
+  const { business, user, can, locationId, location, paymentMethods } = useSession();
 
   const [cart, setCart] = useLocalStorage<CartState>(`sb.pos.cart.${user.id}.${locationId}`, emptyCart());
   const [heldSaleId, setHeldSaleId] = React.useState<string | null>(null);
@@ -130,6 +135,9 @@ function PointOfSale() {
   const [heldOpen, setHeldOpen] = React.useState(false);
   const [shiftOpen, setShiftOpen] = React.useState(false);
   const [result, setResult] = React.useState<CheckoutResponse | null>(null);
+  const [offlineSale, setOfflineSale] = React.useState<OutboxSale | null>(null);
+  const online = useOnline();
+  const catalog = useCatalog(business.id, locationId);
   const [mobileView, setMobileView] = React.useState<"products" | "cart">("products");
   const searchRef = React.useRef<HTMLInputElement>(null);
 
@@ -142,8 +150,21 @@ function PointOfSale() {
   const cust = cart.customerId ? customer.data ?? null : null;
   const tier = cust?.priceTier ?? "retail";
   const shift = useApiQuery<{ shift: Shift | null }>(can("registers.use") ? "/shifts/current" : null, { locationId });
+  // The last register shift we saw, so the till can keep selling when the shift can't be fetched.
+  const shiftKey = `shift:${user.id}:${locationId}`;
+  const [cachedShift, setCachedShift] = React.useState<{ shift: Shift | null } | null>(null);
+  React.useEffect(() => {
+    void kvGet<{ shift: Shift | null }>(shiftKey).then((v) => setCachedShift(v ?? null));
+  }, [shiftKey]);
+  React.useEffect(() => {
+    if (shift.data) void kvSet(shiftKey, shift.data);
+  }, [shift.data, shiftKey]);
   const categories = useApiQuery<Category[]>("/categories", undefined, { staleTime: 60_000 });
-  const grid = useApiQuery<SellableItem[]>("/products/sellable", { locationId, categoryId: categoryId ?? undefined, limit: 60 }, { staleTime: 15_000 });
+  const grid = useApiQuery<SellableItem[]>(
+    online ? "/products/sellable" : null,
+    { locationId, categoryId: categoryId ?? undefined, limit: 60 },
+    { staleTime: 15_000 },
+  );
   const held = useApiQuery<HeldSale[]>("/held-sales", { locationId }, { staleTime: 15_000 });
 
   // ---------------------------------------------------------------- URL hand-offs (customer, quotation)
@@ -214,7 +235,8 @@ function PointOfSale() {
   const st = settlement(totals.total, hasSale, credit.total, ret?.invoice.amountDue ?? 0);
   const itemCount = cart.lines.reduce((s, l) => s + l.quantity, 0);
   const shortLines = business.allowNegativeStock ? [] : cart.lines.filter((l) => l.trackInventory && l.variantId && l.quantity > l.stock);
-  const needsShift = business.requireShift && can("registers.use") && !shift.isLoading && !shift.data?.shift;
+  const knownShift = shift.data ?? (online ? null : cachedShift);
+  const needsShift = business.requireShift && can("registers.use") && !shift.isLoading && !knownShift?.shift;
   const empty = !hasSale && !ret;
 
   const update = (patch: Partial<CartState>) => setCart((c) => ({ ...c, ...patch }));
@@ -231,7 +253,7 @@ function PointOfSale() {
 
   /** A scan that matches nothing: offer to create the product with that barcode filled in. */
   const notFound = (code: string) => {
-    if (!can("products.manage")) return toast.error(`No product found for “${code}”`);
+    if (!online || !can("products.manage")) return toast.error(`No product found for “${code}”`);
     toast(`No product found for “${code}”`, {
       action: { label: "Add product", onClick: () => router.push(`/products/new?barcode=${encodeURIComponent(code)}`) },
       duration: 8000,
@@ -246,14 +268,57 @@ function PointOfSale() {
   }, [setCart, today]);
 
   // ---------------------------------------------------------------- mutations
-  const checkout = useApiMutation((body: CheckoutInput) => api.post<CheckoutResponse>("/sales/checkout", body), {
-    invalidate: INVALIDATE,
-    onSuccess: (res) => {
-      setPayOpen(false);
-      setResult(res);
-      reset();
+  /** Save a finished sale on this device; it is sent to the server as soon as there is a connection. */
+  const queueSale = async (body: CheckoutInput): Promise<OutboxSale> => {
+    const sale: OutboxSale = {
+      ref: body.clientRef!,
+      businessId: business.id,
+      userId: user.id,
+      createdAt: Date.now(),
+      body: { ...body, date: today },
+      summary: {
+        total: totals.total,
+        change: (body.payments ?? []).reduce((s, t) => s + Math.max(0, (t.tendered ?? 0) - t.amount), 0),
+        itemCount: itemCount,
+        customerName: cust?.name ?? null,
+        lines: cart.lines.map((l, i) => ({ name: l.name, quantity: l.quantity, unitPrice: l.unitPrice, total: totals.lines[i]?.total ?? 0 })),
+        payments: (body.payments ?? []).map((t) => ({
+          label: paymentMethods.find((m) => m.id === t.methodId)?.name ?? "Payment",
+          amount: t.amount,
+        })),
+      },
+      status: "pending",
+      attempts: 0,
+    };
+    await outboxPut(sale);
+    await reduceCatalogStock(business.id, locationId, body.lines.map((l) => ({ variantId: l.variantId ?? null, quantity: l.quantity })));
+    return sale;
+  };
+
+  // What can be settled without the server: plain sales paid with the shop's own payment methods.
+  const canQueue = (body: CheckoutInput) =>
+    body.lines.length > 0 && !body.returnFrom && !body.refund && !body.allowCredit && body.payments.every((t) => t.tender === "method");
+
+  const checkout = useApiMutation(
+    async (body: CheckoutInput): Promise<{ done: CheckoutResponse } | { queued: OutboxSale }> => {
+      try {
+        return { done: await api.post<CheckoutResponse>("/sales/checkout", body) };
+      } catch (e) {
+        // The connection dropped mid-sale. Same clientRef, so if the server did get it, it is not recorded twice.
+        if (e instanceof ApiError && e.status === 0 && canQueue(body)) return { queued: await queueSale(body) };
+        throw e;
+      }
     },
-  });
+    {
+      invalidate: INVALIDATE,
+      onSuccess: (out) => {
+        setPayOpen(false);
+        if ("queued" in out) setOfflineSale(out.queued);
+        else setResult(out.done);
+        reset();
+      },
+    },
+  );
 
   const hold = useApiMutation(
     async (body: HeldSaleInput) => {
@@ -268,7 +333,8 @@ function PointOfSale() {
   );
 
   const submit = (p: PaymentResult) => {
-    checkout.mutate({
+    const body: CheckoutInput = {
+      clientRef: crypto.randomUUID(),
       locationId,
       customerId: cart.customerId,
       salespersonId: cart.salespersonId,
@@ -303,7 +369,17 @@ function PointOfSale() {
       refund: p.refund,
       quotationId: cart.quotationId,
       heldSaleId,
-    });
+    };
+    if (!online) {
+      if (!canQueue(body)) return toast.error("This sale needs a connection. Use cash or card and no credit while offline.");
+      void queueSale(body).then((sale) => {
+        setPayOpen(false);
+        setOfflineSale(sale);
+        reset();
+      });
+      return;
+    }
+    checkout.mutate(body);
   };
 
   const charge = () => {
@@ -318,6 +394,7 @@ function PointOfSale() {
   };
 
   const holdCart = () => {
+    if (!online) return toast.error("Holding a sale needs a connection");
     if (!hasSale) return toast.error("Add items before holding the sale");
     if (ret) return toast.error("Finish or cancel the return before holding");
     hold.mutate({
@@ -345,16 +422,16 @@ function PointOfSale() {
   };
 
   // ---------------------------------------------------------------- keyboard
-  const dialogsOpen = payOpen || !!editing || customOpen || optionsOpen || returnOpen || heldOpen || shiftOpen || !!result;
+  const dialogsOpen = payOpen || !!offlineSale || !!editing || customOpen || optionsOpen || returnOpen || heldOpen || shiftOpen || !!result;
   useHotkeys("f9, mod+enter", charge, { enabled: !dialogsOpen, enableInInputs: true });
   useHotkeys("f4", holdCart, { enabled: !dialogsOpen });
   useHotkeys("f8", () => setOptionsOpen(true), { enabled: !dialogsOpen && hasSale });
   useHotkeys("f2, /", () => searchRef.current?.focus(), { enabled: !dialogsOpen });
-  useHotkeys("f6", () => can("sales.return") && setReturnOpen(true), { enabled: !dialogsOpen });
+  useHotkeys("f6", () => can("sales.return") && (online ? setReturnOpen(true) : toast.error("Returns need a connection")), { enabled: !dialogsOpen });
 
   if (!allowed) return null;
 
-  const openShift = shift.data?.shift;
+  const openShift = (shift.data ?? (online ? null : cachedShift))?.shift;
   const chargeLabel = empty
     ? "Charge"
     : !hasSale
@@ -365,7 +442,7 @@ function PointOfSale() {
       ? "Charge"
       : "Complete";
   const activeCategory = categoryId ? (categories.data ?? []).find((c) => c.id === categoryId) : null;
-  const shelf = grid.data ?? [];
+  const shelf = online ? grid.data ?? [] : catalog ? searchCatalog(catalog.items, "", { limit: 60, categoryId }) : [];
   const lowStock = shelf.filter((i) => i.trackInventory && i.stock > 0 && i.stock <= LOW_STOCK).length;
 
   return (
@@ -403,14 +480,15 @@ function PointOfSale() {
           </button>
         )}
         <div className="flex-1" />
+        <OfflineStatus />
         <LiveClock />
         {can("sales.return") && (
-          <Button variant={ret ? "soft" : "ghost"} size="sm" onClick={() => setReturnOpen(true)}>
+          <Button variant={ret ? "soft" : "ghost"} size="sm" onClick={() => (online ? setReturnOpen(true) : toast.error("Returns need a connection"))}>
             <Undo2 /> <span className="hidden sm:inline">Return</span>
             <Kbd className="ml-1 hidden lg:inline-flex">F6</Kbd>
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={() => setHeldOpen(true)}>
+        <Button variant="ghost" size="sm" onClick={() => (online ? setHeldOpen(true) : toast.error("Held sales need a connection"))}>
           <PauseCircle /> <span className="hidden sm:inline">Held</span>
           {(held.data?.length ?? 0) > 0 && (
             <span className="ml-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-highlight px-1 text-[10.5px] font-semibold text-highlight-foreground">
@@ -559,7 +637,7 @@ function PointOfSale() {
               {ret && (
                 <button
                   type="button"
-                  onClick={() => setReturnOpen(true)}
+                  onClick={() => (online ? setReturnOpen(true) : toast.error("Returns need a connection"))}
                   className="flex w-full items-center gap-3 border-b border-dashed border-border-strong bg-warning-soft/50 px-4 py-3 text-left"
                 >
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-warning/15 text-warning">
@@ -751,6 +829,7 @@ function PointOfSale() {
         refundDue={st.refundDue}
         customer={cust}
         pending={checkout.isPending}
+        offline={!online}
         summary={
           ret
             ? [
@@ -761,6 +840,14 @@ function PointOfSale() {
             : undefined
         }
         onComplete={submit}
+      />
+      <OfflineSaleDialog
+        sale={offlineSale}
+        onNewSale={() => {
+          setOfflineSale(null);
+          setMobileView("products");
+          requestAnimationFrame(() => searchRef.current?.focus());
+        }}
       />
       <SaleCompleteDialog
         result={result}

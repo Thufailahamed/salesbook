@@ -5,6 +5,7 @@ import {
   BadgePercent,
   ArrowRightLeft,
   Barcode,
+  BellRing,
   BookOpen,
   Boxes,
   ChartColumn,
@@ -86,6 +87,7 @@ export const NAV: NavGroup[] = [
     label: "Contacts",
     items: [
       { label: "Customers", href: "/customers", icon: Users, permission: "customers.view", keywords: ["clients", "khata", "credit"] },
+      { label: "Overdue reminders", href: "/customers/reminders", icon: BellRing, permission: "messaging.send", keywords: ["sms", "whatsapp", "collect", "chase", "message"] },
       { label: "Suppliers", href: "/suppliers", icon: Truck, permission: "suppliers.view", keywords: ["vendors"] },
     ],
   },

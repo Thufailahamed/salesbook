@@ -23,6 +23,7 @@ import {
 import { Hint } from "@/components/ui/tooltip";
 import { useSession } from "@/hooks/use-session";
 import { useTheme, type Theme } from "@/providers/theme-provider";
+import { clearOfflineCache } from "@/lib/offline-db";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useCommandPalette } from "./command-palette";
@@ -86,6 +87,7 @@ export function UserMenu() {
       /* ignore */
     }
     qc.clear();
+    void clearOfflineCache();
     router.replace("/login");
   };
 

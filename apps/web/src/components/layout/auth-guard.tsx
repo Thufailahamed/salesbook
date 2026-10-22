@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { MeResponse } from "@shopbooks/shared";
 import { api, ApiError, errorMessage } from "@/lib/api";
+import { kvGet, kvSet } from "@/lib/offline-db";
+import { OfflineRunner } from "@/components/offline/offline-runner";
 import { SessionProvider } from "@/providers/session-provider";
 import { FullPageLoader } from "@/components/loading";
 import { Button } from "@/components/ui/button";
@@ -14,7 +16,19 @@ import { BrandMark } from "./brand";
 export function useMeQuery() {
   return useQuery<MeResponse, Error>({
     queryKey: ["/auth/me", {}],
-    queryFn: () => api.get<MeResponse>("/auth/me"),
+    queryFn: async () => {
+      try {
+        const me = await api.get<MeResponse>("/auth/me");
+        void kvSet("me", me); // so the POS can still open with no connection
+        return me;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 0) {
+          const cached = await kvGet<MeResponse>("me");
+          if (cached) return cached;
+        }
+        throw e;
+      }
+    },
     staleTime: 5 * 60_000,
     retry: false,
   });
@@ -50,5 +64,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <SessionProvider me={data}>{children}</SessionProvider>;
+  return (
+    <SessionProvider me={data}>
+      <OfflineRunner />
+      {children}
+    </SessionProvider>
+  );
 }

@@ -298,7 +298,7 @@ function mapSellable(r: SellableRow, promotion: PromotionTerms | null): Sellable
 
 export async function searchSellable(
   ctx: Ctx,
-  q: { q?: string; locationId?: string; categoryId?: string; limit: number; includeServices: boolean },
+  q: { q?: string; locationId?: string; categoryId?: string; limit: number; offset?: number; includeServices: boolean },
 ): Promise<SellableItem[]> {
   const conds: SQL[] = [
     eq(variants.businessId, ctx.businessId),
@@ -318,7 +318,7 @@ export async function searchSellable(
     }
   }
   // Exact code / prefix matches first. (A bare constant like `ORDER BY 0` is read by SQLite as a column position.)
-  const order = [sql`${products.name} COLLATE NOCASE`, asc(variants.sortOrder)];
+  const order = [sql`${products.name} COLLATE NOCASE`, asc(variants.sortOrder), asc(variants.id)];
   if (term) {
     order.unshift(
       sql`CASE WHEN upper(${variants.barcode}) = upper(${term}) OR upper(${variants.sku}) = upper(${term}) THEN 0 WHEN ${products.name} LIKE ${`${term}%`} THEN 1 ELSE 2 END`,
@@ -327,7 +327,8 @@ export async function searchSellable(
   const rows = await sellableSelect(ctx, q.locationId)
     .where(and(...conds))
     .orderBy(...order)
-    .limit(q.limit);
+    .limit(q.limit)
+    .offset(q.offset ?? 0);
   const promos = await promotionsFor(ctx, rows.map((r) => ({ variantId: r.v.id, productId: r.v.productId })));
   return rows.map((r) => mapSellable(r, promos.get(r.v.id) ?? null));
 }

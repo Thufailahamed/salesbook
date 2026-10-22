@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, FileText, PauseCircle, Printer, Receipt, ScanLine, Search, Trash2 } from "lucide-react";
+import { CheckCircle2, FileText, MessageCircle, PauseCircle, Printer, Receipt, ScanLine, Search, Trash2 } from "lucide-react";
 import type { CheckoutResponse, DiscountType, HeldSale, Invoice, ReturnableLine } from "@shopbooks/shared";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -14,6 +14,7 @@ import { MoneyInput, PercentInput, QtyInput } from "@/components/money-input";
 import { Money } from "@/components/money";
 import { EmptyState } from "@/components/empty-state";
 import { TaxRateSelect } from "@/components/entity-selects";
+import { SendMessageDialog } from "@/components/send-message-dialog";
 import { ReturnLinesPicker, type ReturnPicks } from "@/components/return-lines-picker";
 import { useApiMutation, useApiQuery } from "@/hooks/use-api";
 import { useMoney } from "@/hooks/use-money";
@@ -470,6 +471,8 @@ export function HeldSalesSheet({
 
 export function SaleCompleteDialog({ result, onNewSale }: { result: CheckoutResponse | null; onNewSale: () => void }) {
   const money = useMoney();
+  const { can } = useSession();
+  const [textOpen, setTextOpen] = React.useState(false);
   const inv = result?.invoice;
   const ret = result?.saleReturn;
   const printReceipt = () => {
@@ -477,6 +480,7 @@ export function SaleCompleteDialog({ result, onNewSale }: { result: CheckoutResp
     else if (ret) window.open(`/print/return?id=${ret.id}&format=receipt&autoprint=1`, "_blank");
   };
   return (
+    <>
     <Dialog open={!!result} onOpenChange={(o) => !o && onNewSale()}>
       <DialogContent size="sm" hideClose onEscapeKeyDown={onNewSale}>
         <div className="flex flex-col items-center gap-3 px-6 pt-8 pb-2 text-center">
@@ -541,11 +545,18 @@ export function SaleCompleteDialog({ result, onNewSale }: { result: CheckoutResp
               <Printer /> Credit note
             </Button>
           )}
+          {inv && can("messaging.send") && (
+            <Button variant="outline" className="col-span-2" onClick={() => setTextOpen(true)}>
+              <MessageCircle /> Send receipt by SMS / WhatsApp
+            </Button>
+          )}
           <Button className="col-span-2" size="lg" onClick={onNewSale} autoFocus>
             New sale
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {inv && <SendMessageDialog open={textOpen} onOpenChange={setTextOpen} kind="receipt" invoiceId={inv.id} customerId={inv.customerId} />}
+    </>
   );
 }

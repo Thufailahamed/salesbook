@@ -3,9 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Ban, CreditCard, FileText, HandCoins, MoreHorizontal, Printer, Receipt, Undo2 } from "lucide-react";
+import { Ban, CreditCard, MessageCircle, FileText, HandCoins, MoreHorizontal, Printer, Receipt, Undo2 } from "lucide-react";
 import type { Customer, GatewayCheckout, Invoice, InvoicePaymentInput, TenderInput } from "@shopbooks/shared";
 import { TENDER_LABELS } from "@shopbooks/shared";
+import { SendMessageDialog } from "@/components/send-message-dialog";
 import { PageHeader } from "@/components/page-header";
 import { DetailSkeleton, ErrorState } from "@/components/loading";
 import { KeyValue } from "@/components/key-value";
@@ -54,6 +55,7 @@ function InvoiceView() {
   const { can, business } = useSession();
   const { data: inv, isLoading, error, refetch } = useApiQuery<Invoice>(id ? `/sales/${id}` : null);
   const [payOpen, setPayOpen] = React.useState(false);
+  const [msgKind, setMsgKind] = React.useState<"receipt" | "order_ready" | null>(null);
   const gw = useApiQuery<{ enabled: boolean }>("/gateway/status");
   const checkout = useApiMutation(
     () => api.post<GatewayCheckout>("/gateway/checkouts", { invoiceId: id, returnOrigin: window.location.origin }),
@@ -106,6 +108,19 @@ function InvoiceView() {
             <Button variant="outline" onClick={() => print()}>
               <Printer /> Invoice
             </Button>
+            {can("messaging.send") && !isVoid && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <MessageCircle /> Message
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem onClick={() => setMsgKind("receipt")}>Send receipt</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setMsgKind("order_ready")}>Order is ready</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             {canPay && gw.data?.enabled && (
               <Button variant="outline" loading={checkout.isPending} onClick={() => checkout.mutate()}>
                 <CreditCard /> Pay online
@@ -389,6 +404,7 @@ function InvoiceView() {
         </div>
       </div>
 
+      {msgKind && <SendMessageDialog open onOpenChange={(o) => !o && setMsgKind(null)} kind={msgKind} invoiceId={inv.id} customerId={inv.customerId} />}
       {canPay && <InvoicePaymentDialog open={payOpen} onOpenChange={setPayOpen} invoice={inv} />}
     </>
   );

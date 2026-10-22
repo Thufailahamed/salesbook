@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { HandCoins, Plus, Users, WalletCards } from "lucide-react";
+import Link from "next/link";
+import { BellRing, HandCoins, Plus, Users, WalletCards } from "lucide-react";
 import type { Customer, Paginated } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { DataTable, type Column } from "@/components/data-table";
@@ -105,11 +106,20 @@ function CustomersPage() {
         title="Customers"
         description="Accounts, credit balances and buying history."
         actions={
-          can("customers.manage") && (
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus /> New customer
-            </Button>
-          )
+          <>
+            {can("messaging.send") && (
+              <Button variant="outline" asChild>
+                <Link href="/customers/reminders">
+                  <BellRing /> Overdue reminders
+                </Link>
+              </Button>
+            )}
+            {can("customers.manage") && (
+              <Button onClick={() => setCreateOpen(true)}>
+                <Plus /> New customer
+              </Button>
+            )}
+          </>
         }
       />
 
