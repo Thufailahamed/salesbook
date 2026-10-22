@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Building2, Check, Eye, EyeOff, Globe2, Lock, Mail, Percent, User } from "lucide-react";
-import { CURRENCIES, type AuthResponse, type PublicPlans, type PurchaseResult, type SignupInput } from "@shopbooks/shared";
+import { CURRENCIES, TRIAL_DAYS, type AuthResponse, type PublicPlans, type PurchaseResult, type SignupInput } from "@shopbooks/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -89,6 +89,9 @@ export default function SignupPage() {
   const [step, setStep] = React.useState<1 | 2 | 3>(1);
   const { data: pricing } = useApiQuery<PublicPlans>("/public/plans");
   const paid = !!pricing?.paymentRequired;
+  /** Any active plan means signup ends on a plan step: pay now (paid) or start a free trial. */
+  const hasPlans = !!pricing?.plans.length;
+  const single = pricing?.plans.length === 1;
   const [planId, setPlanId] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (pricing?.plans.length && !planId) setPlanId((pricing.plans.find((p) => p.priceCents > 0) ?? pricing.plans[0])!.id);
@@ -147,13 +150,13 @@ export default function SignupPage() {
         setFieldErrors({ businessName: "Enter your shop name" });
         return;
       }
-      if (paid) {
+      if (hasPlans) {
         setFieldErrors({});
         setStep(3);
         return;
       }
     }
-    if (paid && !planId) {
+    if (hasPlans && !planId) {
       setError("Choose a plan");
       return;
     }
@@ -171,6 +174,7 @@ export default function SignupPage() {
       taxInclusive: form.taxInclusive,
       defaultTaxRate: form.defaultTaxRate,
       taxName: form.taxName.trim() || "Tax",
+      planId: hasPlans && !paid ? planId : null,
     };
     try {
       if (paid) {
@@ -214,7 +218,7 @@ export default function SignupPage() {
             {[
               { n: 1, label: "Your account" },
               { n: 2, label: "Your shop" },
-              ...(paid ? [{ n: 3, label: "Plan & pay" }] : []),
+              ...(hasPlans ? [{ n: 3, label: paid ? "Plan & pay" : "Your plan" }] : []),
             ].map((s, i) => (
               <React.Fragment key={s.n}>
                 {i > 0 && <div className={cn("h-px flex-1", step >= s.n ? "bg-primary" : "bg-border")} />}
@@ -239,14 +243,16 @@ export default function SignupPage() {
 
           <div className="mb-7">
             <h1 className="font-display text-[36px] leading-[1.05] font-semibold tracking-[-0.03em]">
-              {step === 1 ? "Create your account" : step === 2 ? "Set up your shop" : "Choose your plan"}
+              {step === 1 ? "Create your account" : step === 2 ? "Set up your shop" : single ? "Your plan" : "Choose your plan"}
             </h1>
             <p className="mt-1.5 text-[14px] text-muted-foreground">
               {step === 1
                 ? "You'll be the owner. Invite your team after setup."
                 : step === 2
                   ? "We'll create your chart of accounts, payment methods and a main store for you."
-                  : "Pay securely with payments.lk. Your shop is created the moment the payment clears."}
+                  : paid
+                    ? "Pay securely with payments.lk. Your shop is created the moment the payment clears."
+                    : `Start with a ${TRIAL_DAYS}-day free trial — no card needed. Pay from Settings → Subscription before it ends.`}
             </p>
           </div>
 
@@ -318,22 +324,46 @@ export default function SignupPage() {
                 </Field>
               </>
             ) : step === 3 ? (
-              <div className="grid gap-3">
-                {pricing?.plans.map((p) => (
-                  <button
-                    type="button"
-                    key={p.id}
-                    onClick={() => setPlanId(p.id)}
-                    className={cn("rounded-xl border p-4 text-left transition-colors", planId === p.id ? "border-primary bg-primary-soft ring-2 ring-primary/20" : "border-border hover:bg-muted/40")}
-                  >
-                    <span className="flex items-baseline justify-between gap-3">
+              <div role="radiogroup" aria-label="Plan" className="grid gap-3">
+                {pricing?.plans.map((p) => {
+                  const selected = planId === p.id;
+                  return (
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      key={p.id}
+                      onClick={() => setPlanId(p.id)}
+                      className={cn(
+                        "relative rounded-xl border p-4 pr-12 text-left transition-colors",
+                        selected ? "border-primary bg-primary-soft ring-2 ring-primary/20" : "border-border hover:bg-muted/40",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "absolute top-4 right-4 flex size-5 items-center justify-center rounded-full border transition-colors",
+                          selected ? "border-primary bg-primary text-primary-foreground" : "border-border-strong",
+                        )}
+                      >
+                        {selected && <Check className="size-3" strokeWidth={3} />}
+                      </span>
                       <span className="font-display text-lg font-semibold">{p.name}</span>
-                      <span className="num text-[15px] font-semibold">{lkr(p.priceCents)} <span className="text-xs font-normal text-muted-foreground">/ {periodLabel(p.periodDays)}</span></span>
-                    </span>
-                    {p.description && <span className="mt-1 block text-[13px] text-muted-foreground">{p.description}</span>}
-                    <span className="mt-2 block text-xs text-muted-foreground">{p.maxUsers || "Unlimited"} users · {p.maxLocations || "Unlimited"} locations</span>
-                  </button>
-                ))}
+                      <span className="mt-1 block">
+                        <span className="num text-[22px] font-semibold tracking-[-0.02em]">{lkr(p.priceCents)}</span>{" "}
+                        <span className="text-xs text-muted-foreground">/ {periodLabel(p.periodDays)}</span>
+                      </span>
+                      {!paid && p.priceCents > 0 && (
+                        <span className="mt-1 block text-[13px] font-medium text-primary-soft-foreground">
+                          {TRIAL_DAYS} days free, then {lkr(p.priceCents)} / {periodLabel(p.periodDays)}
+                        </span>
+                      )}
+                      {p.description && <span className="mt-1 block text-[13px] text-muted-foreground">{p.description}</span>}
+                      <span className="mt-2 block text-xs text-muted-foreground">
+                        {p.maxUsers || "Unlimited"} users · {p.maxLocations || "Unlimited"} locations
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <>
@@ -418,13 +448,13 @@ export default function SignupPage() {
                 </Button>
               )}
               <Button type="submit" size="lg" className="flex-1" loading={loading}>
-                {step === 1 || (step === 2 && paid) ? (
+                {step === 1 || (step === 2 && hasPlans) ? (
                   <>
                     Continue <ArrowRight />
                   </>
                 ) : step === 3 ? (
                   <>
-                    Pay &amp; create my shop <ArrowRight />
+                    {paid ? <>Pay &amp; create my shop</> : "Start my free trial"} <ArrowRight />
                   </>
                 ) : (
                   <>
@@ -434,7 +464,11 @@ export default function SignupPage() {
               </Button>
             </div>
             <p className="text-center text-xs text-muted-foreground">
-              {paid ? "Payments are processed by payments.lk. We never see your card details." : "Free to start. Your data stays in your own Cloudflare account."}
+              {paid
+                ? "Payments are processed by payments.lk. We never see your card details."
+                : hasPlans
+                  ? `No card needed for the ${TRIAL_DAYS}-day trial.`
+                  : "Free to start. Your data stays in your own Cloudflare account."}
             </p>
           </form>
         </div>

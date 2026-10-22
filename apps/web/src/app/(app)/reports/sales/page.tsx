@@ -2,9 +2,8 @@
 
 import { Banknote, Percent, Receipt, ShoppingBasket, TrendingUp, Undo2 } from "lucide-react";
 import type { SalesSummaryReport } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
+import { ReportPage, ReportSection } from "@/components/report-shell";
 import { StatCard } from "@/components/stat-card";
-import { SectionCard } from "@/components/section-card";
 import { TrendAreaChart } from "@/components/charts/area-chart";
 import { SimpleBarChart } from "@/components/charts/bar-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
@@ -12,6 +11,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Money } from "@/components/money";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useMoney } from "@/hooks/use-money";
+import { SalesReviewCard } from "@/components/sales-review-card";
 import { formatDate, formatNumber, formatPercent } from "@/lib/utils";
 
 export default function SalesReportPage() {
@@ -31,6 +31,7 @@ export default function SalesReportPage() {
         const t = r.totals;
         return (
           <div className="grid gap-6">
+            <SalesReviewCard from={r.from} to={r.to} />
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <StatCard variant="feature" label="Net sales" value={money.format(t.netSales)} icon={Banknote} sublabel={`${formatNumber(t.invoices)} invoices`} />
               <StatCard label="Gross profit" value={money.format(t.grossProfit)} icon={TrendingUp} tone="success" sublabel={`${formatPercent(t.margin)} margin`} />
@@ -43,7 +44,7 @@ export default function SalesReportPage() {
               <StatCard size="sm" label="Returns" value={money.format(t.returns)} icon={Undo2} tone="danger" />
               <StatCard size="sm" label="Tax" value={money.format(t.tax)} tone="neutral" />
             </div>
-            <SectionCard title="Sales & profit over time">
+            <ReportSection title="Sales & profit over time">
               {r.series.length === 0 ? (
                 <EmptyState compact title="No sales in this period" />
               ) : (
@@ -60,16 +61,16 @@ export default function SalesReportPage() {
                   valueFormatter={(v) => money.format(v)}
                 />
               )}
-            </SectionCard>
+            </ReportSection>
             <div className="grid gap-6 xl:grid-cols-3">
-              <SectionCard title="Payment methods">
+              <ReportSection title="Payment methods">
                 {r.byPaymentMethod.length === 0 ? (
                   <EmptyState compact title="No payments" />
                 ) : (
                   <DonutChart data={r.byPaymentMethod.map((m) => ({ name: m.name, value: m.amount }))} valueFormatter={(v) => money.format(v)} height={180} />
                 )}
-              </SectionCard>
-              <SectionCard title="Busiest hours">
+              </ReportSection>
+              <ReportSection title="Busiest hours">
                 {r.byHour.every((h) => !h.invoices) ? (
                   <EmptyState compact title="No data" />
                 ) : (
@@ -81,8 +82,8 @@ export default function SalesReportPage() {
                     valueFormatter={(v) => formatNumber(v)}
                   />
                 )}
-              </SectionCard>
-              <SectionCard title="By staff" flush>
+              </ReportSection>
+              <ReportSection title="By staff" flush>
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-muted/40 hover:bg-muted/40"><TableHead>Name</TableHead><TableHead align="right">Invoices</TableHead><TableHead align="right">Sales</TableHead></TableRow>
@@ -97,10 +98,10 @@ export default function SalesReportPage() {
                     ))}
                   </TableBody>
                 </Table>
-              </SectionCard>
+              </ReportSection>
             </div>
             {r.byLocation.length > 1 && (
-              <SectionCard title="By location" flush>
+              <ReportSection title="By location" flush>
                 <Table>
                   <TableBody>
                     {r.byLocation.map((l) => (
@@ -112,7 +113,7 @@ export default function SalesReportPage() {
                     ))}
                   </TableBody>
                 </Table>
-              </SectionCard>
+              </ReportSection>
             )}
           </div>
         );

@@ -25,6 +25,8 @@ import {
   trialBalance,
 } from "../services/reports-finance";
 import { inventoryValuation, stockHealth, stockRows } from "../services/reports-inventory";
+import { cashForecast } from "../services/cash-forecast";
+import { salesReview } from "../services/sales-review";
 import { deadStockReport, expiryReport } from "../services/reports-stock";
 import {
   categorySales,
@@ -208,6 +210,13 @@ app.get("/trial-balance", view, vQuery(reportQuerySchema), async (c) => {
 app.get("/cash-flow", view, vQuery(reportQuerySchema), async (c) => {
   const ctx = c.get("ctx");
   return c.json(await cashFlow(ctx, reportRange(ctx, c.req.valid("query"))));
+});
+
+app.get("/cash-forecast", view, async (c) => c.json(await cashForecast(c.get("ctx"), c.env)));
+
+app.get("/sales-review", view, vQuery(reportQuerySchema), async (c) => {
+  const ctx = c.get("ctx");
+  return c.json(await salesReview(ctx, c.env, reportRange(ctx, c.req.valid("query"))));
 });
 
 app.get("/tax", view, vQuery(reportQuerySchema), async (c) => {

@@ -1,8 +1,7 @@
 "use client";
 
 import type { TaxReport } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
-import { SectionCard } from "@/components/section-card";
+import { ReportPage, ReportSection } from "@/components/report-shell";
 import { StatCard } from "@/components/stat-card";
 import { KeyValue } from "@/components/key-value";
 import { Money } from "@/components/money";
@@ -38,7 +37,7 @@ export default function TaxReportPage() {
             />
           </div>
           <div className="grid gap-6 lg:grid-cols-2">
-            <SectionCard title="Output tax">
+            <ReportSection title="Output tax">
               <KeyValue
                 layout="inline"
                 items={[
@@ -47,8 +46,8 @@ export default function TaxReportPage() {
                   { label: "Output tax", value: <Money value={r.outputTax} className="font-semibold" /> },
                 ]}
               />
-            </SectionCard>
-            <SectionCard title="Input tax">
+            </ReportSection>
+            <ReportSection title="Input tax">
               <KeyValue
                 layout="inline"
                 items={[
@@ -58,9 +57,9 @@ export default function TaxReportPage() {
                   { label: "Input tax", value: <Money value={r.inputTax} className="font-semibold" /> },
                 ]}
               />
-            </SectionCard>
+            </ReportSection>
           </div>
-          <SectionCard title="By tax rate" flush>
+          <ReportSection title="By tax rate" flush>
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -83,7 +82,7 @@ export default function TaxReportPage() {
                 ))}
               </TableBody>
             </Table>
-          </SectionCard>
+          </ReportSection>
         </div>
       )}
     </ReportPage>

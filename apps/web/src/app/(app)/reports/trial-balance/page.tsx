@@ -4,8 +4,7 @@ import Link from "next/link";
 import { CheckCircle2, TriangleAlert } from "lucide-react";
 import type { TrialBalanceReport } from "@shopbooks/shared";
 import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPES } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
-import { SectionCard } from "@/components/section-card";
+import { ReportPage, ReportSection } from "@/components/report-shell";
 import { Money } from "@/components/money";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useMoney } from "@/hooks/use-money";
@@ -28,7 +27,7 @@ export default function TrialBalancePage() {
         const ok = r.totalDebit === r.totalCredit;
         return (
           <div className="grid gap-6">
-            <SectionCard flush>
+            <ReportSection flush>
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -65,7 +64,7 @@ export default function TrialBalancePage() {
                   </TableRow>
                 </TableFooter>
               </Table>
-            </SectionCard>
+            </ReportSection>
             <div className={`flex items-center gap-3 rounded-2xl px-5 py-4 text-sm ${ok ? "bg-success-soft text-success-soft-foreground" : "bg-destructive-soft text-destructive-soft-foreground"}`}>
               {ok ? <CheckCircle2 className="size-4" /> : <TriangleAlert className="size-4" />}
               {ok ? "The books are in balance." : <>Out of balance by <Money value={Math.abs(r.totalDebit - r.totalCredit)} /></>}

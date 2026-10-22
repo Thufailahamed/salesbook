@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import type { AccountAmount, ProfitLossReport } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
-import { SectionCard } from "@/components/section-card";
+import { ReportPage, ReportSection } from "@/components/report-shell";
 import { StatCard } from "@/components/stat-card";
 import { Money } from "@/components/money";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
@@ -87,7 +86,7 @@ export default function ProfitLossPage() {
           <p className="-mt-2 text-xs text-muted-foreground">
             Compared with {r.previous.from} to {r.previous.to}, the equal-length period before this one.
           </p>
-          <SectionCard flush>
+          <ReportSection flush>
             <Table>
               <TableBody>
                 <Section title="Income" />
@@ -110,7 +109,7 @@ export default function ProfitLossPage() {
                 <Subtotal label="Net profit" value={r.netProfit} strong />
               </TableBody>
             </Table>
-          </SectionCard>
+          </ReportSection>
         </div>
       )}
     </ReportPage>

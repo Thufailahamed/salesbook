@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { ArrowDownLeft, ArrowUpRight, Banknote, Landmark } from "lucide-react";
 import type { CashFlowLine, CashFlowReport, CashFlowSection } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
-import { SectionCard } from "@/components/section-card";
+import { ReportPage, ReportSection } from "@/components/report-shell";
+import { CashForecastCard } from "@/components/cash-forecast-card";
 import { StatCard } from "@/components/stat-card";
 import { Money } from "@/components/money";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -37,6 +37,7 @@ export default function CashFlowPage() {
     >
       {(r) => (
         <div className="grid gap-6">
+          <CashForecastCard />
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Opening cash" value={money.format(r.totalOpening)} icon={Landmark} tone="neutral" />
             <StatCard label="Cash in" value={money.format(r.totalInflow)} icon={ArrowDownLeft} tone="success" />
@@ -50,7 +51,7 @@ export default function CashFlowPage() {
             />
           </div>
 
-          <SectionCard title="By activity" flush>
+          <ReportSection title="By activity" flush>
             <Table>
               <TableBody>
                 {(Object.keys(ACTIVITY_LABELS) as (keyof typeof ACTIVITY_LABELS)[]).map((key) => (
@@ -74,9 +75,9 @@ export default function CashFlowPage() {
                 </TableRow>
               </TableFooter>
             </Table>
-          </SectionCard>
+          </ReportSection>
 
-          <SectionCard title="By cash account" flush>
+          <ReportSection title="By cash account" flush>
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -103,7 +104,7 @@ export default function CashFlowPage() {
                 ))}
               </TableBody>
             </Table>
-          </SectionCard>
+          </ReportSection>
         </div>
       )}
     </ReportPage>

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { Building2, CreditCard, Gem, Globe, Hash, MapPin, MoreHorizontal, Pencil, Percent, Plus, Trash2 } from "lucide-react";
+import { Building2, CreditCard, Gem, Globe, Hash, MapPin, MoreHorizontal, Pencil, Percent, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { GatewaySettings, GatewaySettingsInput, Business, BusinessSettingsInput, Location, LocationInput, PaymentMethod, PaymentMethodInput, Sequence, TaxRate, TaxRateInput } from "@shopbooks/shared";
 import { CURRENCIES, PAYMENT_METHOD_TYPES, PAYMENT_METHOD_TYPE_LABELS, SEQUENCE_DEFAULTS, type PaymentMethodType } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
@@ -31,6 +31,7 @@ import { useSession } from "@/hooks/use-session";
 import { api, assetUrl, errorMessage } from "@/lib/api";
 import { toast } from "sonner";
 import { BillingPanel } from "@/components/billing-panel";
+import { AiFeaturesTab } from "@/components/ai-features-tab";
 
 export default function Page() {
   return (
@@ -56,6 +57,7 @@ function SettingsPage() {
           <TabsTrigger value="online"><Globe /> Online payments</TabsTrigger>
           <TabsTrigger value="billing"><Gem /> Subscription</TabsTrigger>
           <TabsTrigger value="numbering"><Hash /> Numbering</TabsTrigger>
+          <TabsTrigger value="ai"><Sparkles /> AI features</TabsTrigger>
         </TabsList>
         <TabsContent value="business"><BusinessTab /></TabsContent>
         <TabsContent value="locations"><LocationsTab /></TabsContent>
@@ -64,6 +66,7 @@ function SettingsPage() {
         <TabsContent value="online"><OnlinePaymentsTab /></TabsContent>
         <TabsContent value="billing"><BillingPanel canManage={can("settings.manage")} /></TabsContent>
         <TabsContent value="numbering"><NumberingTab /></TabsContent>
+        <TabsContent value="ai"><AiFeaturesTab /></TabsContent>
       </Tabs>
     </>
   );

@@ -105,6 +105,21 @@ All endpoints are under `/api`. Request bodies are validated with the zod schema
 | GET / POST | /expenses | expenseListQuerySchema / expenseSchema | Paginated<Expense> & `{ totals: { amount } }` / Expense |
 | GET | /expenses/:id | – | Expense |
 | POST | /expenses/:id/void | voidSchema | Expense |
+| GET | /ai/status | – | AiStatus. Each flag is true only when the server has the feature's model and this business has not switched it off |
+| GET | /reports/sales-review | `?from=&to=` (default: month to date) | SalesReview `{ from, to, invoices, netSales, flags[], summary }` (`reports.view`). Flags: voids, returns (review when no reason), discounts of 20% or more, lines sold below unit cost, and anyone with 3 or more of these in the period. Rules only; `summary` only when `AI_SALESREVIEW_MODEL` is set and the `salesReview` switch is on |
+| GET | /alerts | – | DailyAlert[] (any signed-in user; each check runs only for users with its area: `sales.view` overdue invoices, `suppliers.view` overdue and due-soon bills, `inventory.view` low stock). Rules only, no model. Urgent items first |
+| GET | /reports/cash-forecast | – | CashForecast `{ asOf, openingCash, weeks[4], lowest, summary }` (`reports.view`). Four weeks from cash and bank balances, open invoices and bills by due date (overdue lands in week 1), typical sales (last 30 days) and expenses (last 90 days). `summary` only when `AI_CASHFLOW_MODEL` is set and the `cashForecast` switch is on |
+| GET | /ai/settings | – | AiSettings `{ features: [{ key, label, description, available, enabled }] }` (any signed-in user) |
+| PUT | /ai/settings | `{ features: { [key]?: boolean } }` | AiSettings (`settings.manage`). Stores the switched-off keys in `businesses.ai_disabled`. Features with no model on the server stay unavailable |
+| POST | /ai/receipt | multipart `file` (JPEG/PNG/WEBP, ≤5 MB) | ReceiptScan (`expenses.manage`) |
+| POST | /ai/ask | `{ question }` (3–300 chars) | AiAnswer (`reports.view`) |
+| POST | /ai/bank-suggestions | `{ accountId }` | BankSuggestions (`accounting.view`). Unmatched money-out lines only, max 40 per call |
+| POST | /ai/product-draft | `{ name }` | ProductDraft (`products.manage`). A suggestion only: the form fills empty fields and the user saves |
+| GET | /ai/product-search | `?q=&locationId=` (2–200 chars) | SellableItem[] (`pos.sell`). Runs only when the normal POS search finds nothing. Max 20 |
+| POST | /ai/reorder-advice | `{ locationId? }` | ReorderAdvice (`reports.view`). Rule checks always run; `summary` only when `AI_STOCK_MODEL` is set |
+| POST | /ai/help | `{ question }` (3–300 chars) | HelpAnswer `{ answer, links[] }` (any signed-in user). The model picks up to 2 help topics the user may use, then writes the answer from those topics only. Links come from the topics. 200 with a "could not find" answer when nothing fits |
+| POST | /ai/reminder-draft | `{ partyType: "customer"\|"supplier", partyId }` | ReminderDraft (`customers.view` / `suppliers.view`). Amounts and days overdue come from open invoices or received bills; the model only words the message. 400 when nothing is owed. Nothing is sent |
+| POST | /accounting/close-review | `{ from?, to? }` (default: since last close, up to yesterday) | CloseReview (`accounting.view`). Rule checks always run; `summary` only when `AI_REVIEW_MODEL` is set |
 | GET | /shifts | listQuery + `userId, locationId, status` | Paginated<Shift> |
 | GET | /shifts/current | `?locationId=` | `{ shift: Shift \| null }` (current user) |
 | POST | /shifts/open | shiftOpenSchema | Shift |
@@ -150,6 +165,63 @@ All endpoints are under `/api`. Request bodies are validated with the zod schema
 | GET | /reports/dead-stock | `locationId`, `days` (1–730, default 60) | DeadStockReport |
 | **Audit** ||||
 | GET | /audit-logs | listQuery + `userId, entityType` | Paginated<AuditLog> |
+
+## AI features (Workers AI through Cloudflare AI Gateway)
+
+Models run on Workers AI through the `AI` binding (`wrangler.jsonc`), and each call is routed through an AI Gateway for
+logs, caching and limits. No provider API keys are needed.
+
+| Name | Where | Purpose |
+|---|---|---|
+| `AI` | binding in `wrangler.jsonc` | Workers AI |
+| `AI_GATEWAY_ID` | `vars` (currently `default`) | Gateway the calls go through |
+| `AI_RECEIPT_MODEL` | `vars` | Workers AI model for receipts, e.g. `@cf/meta/llama-3.2-11b-vision-instruct`. Unset = feature off |
+| `AI_ASK_MODEL` | `vars` | Workers AI model for Ask your books, e.g. `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Unset = feature off |
+| `AI_BANK_MODEL` | `vars` | Workers AI model for bank line categories, e.g. `@cf/meta/llama-3.1-8b-instruct-fast`. Unset = feature off |
+| `AI_PRODUCT_MODEL` | `vars` | Workers AI model that drafts product descriptions, tags and category from the name, e.g. `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Unset = feature off |
+| `AI_SEARCH_MODEL` | `vars` | Workers AI model that turns a failed POS search into catalogue words, e.g. `@cf/meta/llama-3.1-8b-instruct-fast`. Unset = feature off |
+| `AI_STOCK_MODEL` | `vars` | Workers AI model that summarises reorder advice, e.g. `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Unset = rules only |
+| `AI_REVIEW_MODEL` | `vars` | Workers AI model for the pre-close review summary, e.g. `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Unset = checks only |
+| `AI_REMINDER_MODEL` | `vars` | Workers AI model that words payment reminders and supplier messages, e.g. `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Unset = feature off |
+| `AI_HELP_MODEL` | `vars` | Workers AI model that answers "how do I…" questions from the built-in help topics (`services/ai-help.ts`), e.g. `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Unset = feature off |
+| `AI_CASHFLOW_MODEL` | `vars` | Workers AI model that writes the two-to-three sentence note on the cash-flow forecast, e.g. `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Unset = numbers only |
+| `AI_SALESREVIEW_MODEL` | `vars` | Workers AI model that writes the note on the sales and refund review, e.g. `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Unset = flags only |
+
+Llama 3.2 Vision needs Meta's licence accepted once in the Cloudflare dashboard (Workers AI → model page), or calls return 403.
+
+**Receipt scan** reads a receipt photo and returns suggested expense values. It never saves anything: the UI fills the
+expense form and the user records it through `POST /expenses`. The suggested category is always one of the business's
+active expense accounts (not cost of goods sold); anything else is dropped. The model names the category, which is matched by
+name. If it names none, a keyword table over the payee and note (fuel, courier, repairs, stationery, …) fills it in.
+Amounts come back in minor units. The image is not stored.
+These vision models ignore JSON-mode options, so the prompt asks for JSON and the reply is parsed from the text.
+
+**Bank suggestions** propose an expense category for each unmatched money-out statement line. Nothing is posted: the
+reconcile page links each suggestion to the expense form, pre-filled from the line. Once the expense is recorded,
+Auto-match pairs it with the statement line. Money-in lines never get a suggestion. Categories are checked against the
+business's active expense accounts.
+
+**Ask your books** picks one of seven read-only report tools and runs it on the server. The model never runs SQL or
+computes totals. Each question makes two model calls.
+
+**Product drafts** fill a new product's description, tags and category from its name, when the user clicks "Draft with AI"
+on the product form. They never overwrite text already typed. The prompt forbids claims the name does't state, such as
+durability or materials. The category is matched only to the business's own list.
+
+**Product search** is a fallback for the POS search box. When the normal search finds nothing, the model turns the
+shopper's words into likely catalogue words (e.g. colours, fabrics). The server then ranks real products by how many words
+they match. Size words are mapped on the server (small → S, medium → M, large → L). The model never sees or returns
+products.
+
+**Reorder advice** flags variants that have less than 14 days of stock left at their net sales rate over the last 30 days,
+and variants that are out of stock. It suggests an order that covers 30 days. It also counts stock with no sales in 30
+days. The rules decide everything; the model only writes a summary of them.
+
+**Close review** runs fixed checks over a period (possible duplicate expenses, bank lines not in the books, unreconciled
+bank entries, manual journals, customer balances over 90 days, no sales). It changes nothing. The model only writes a
+short summary of those findings, and the summary may only restate them.
+
+Each model call logs one `ai_usage` line (model, tokens, Neurons) to the Worker logs.
 
 ## Accounting rules (auto-posted journals)
 
@@ -291,6 +363,11 @@ them creates the admin. Shop tokens never work on `/platform/*` and vice versa.
    `payment.succeeded` the order is re-verified with `GET /v1/checkouts/:id` (status + amount), then `createBusiness()`
    runs and the shop gets `planId` + `subscriptionEndsAt = now + periodDays`. Idempotent per order.
 3. `GET /public/orders/:id` → `{ status }` is polled by `/signup/complete` until the order is `paid`.
+
+When `requirePayment` is off, `POST /auth/signup` takes an optional `planId` (defaults to the first active plan, so the
+API can't be used to skip plans). A paid plan starts a `TRIAL_DAYS` (14) day trial — `subscriptionEndsAt = now + 14d` —
+after which the shop renews from `/billing` like any other; a free plan (price 0) never expires. With no active plans
+the shop gets no plan and never expires. The signup screen shows a plan step whenever plans exist (pre-selected).
 
 **Subscriptions.** `businesses.status` (`active|suspended`), `planId`, `subscriptionEndsAt` (null = never expires, used
 by shops that predate plans). `requireAuth` returns 403 `shop_suspended` for suspended shops, and 402

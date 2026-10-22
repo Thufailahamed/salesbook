@@ -3,15 +3,14 @@
 import Link from "next/link";
 import { CheckCircle2, TriangleAlert } from "lucide-react";
 import type { AccountAmount, BalanceSheetReport } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
-import { SectionCard } from "@/components/section-card";
+import { ReportPage, ReportSection } from "@/components/report-shell";
 import { Money } from "@/components/money";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useMoney } from "@/hooks/use-money";
 
 function Block({ title, rows, total, totalLabel, extra }: { title: string; rows: AccountAmount[]; total: number; totalLabel: string; extra?: { label: string; value: number } }) {
   return (
-    <SectionCard title={title} flush>
+    <ReportSection title={title} flush>
       <Table>
         <TableBody>
           {rows.map((a) => (
@@ -37,7 +36,7 @@ function Block({ title, rows, total, totalLabel, extra }: { title: string; rows:
           </TableRow>
         </TableBody>
       </Table>
-    </SectionCard>
+    </ReportSection>
   );
 }
 

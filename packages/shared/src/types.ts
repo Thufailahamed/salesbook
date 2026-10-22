@@ -1,4 +1,5 @@
 import type { PromotionKind, PromotionTerms } from "./promotions";
+import type { AiFeature } from "./constants";
 import type {
   AccountSubtype,
   AccountType,
@@ -808,6 +809,69 @@ export interface PurchaseReturn {
 
 // ---------------------------------------------------------------- expenses, registers, gift cards
 
+/** AI-read receipt, pre-fills the expense form. Nothing is saved until the user records the expense. */
+export interface ReceiptScan {
+  /** YYYY-MM-DD, or null when unreadable */
+  date: string | null;
+  payee: string | null;
+  /** Minor units, incl. tax */
+  amount: number | null;
+  /** Minor units, recoverable input tax included in amount */
+  taxAmount: number | null;
+  reference: string | null;
+  note: string | null;
+  /** Suggested expense account id, always one of the business's active expense accounts */
+  accountId: string | null;
+  confidence: "high" | "medium" | "low";
+  /** Gateway model that read the receipt, e.g. "google-ai-studio/gemini-2.5-flash" */
+  model: string;
+}
+
+export interface AiStatus {
+  receiptScan: boolean;
+  ask: boolean;
+  bankSuggest: boolean;
+  productSearch: boolean;
+  productDraft: boolean;
+  reminderDraft: boolean;
+  help: boolean;
+  cashForecast: boolean;
+  salesReview: boolean;
+}
+
+/** Answer from the in-app help. Links point at the pages the answer is about. */
+export interface HelpAnswer {
+  answer: string;
+  links: { label: string; href: string }[];
+}
+
+/** AI draft for a product form. Null fields mean the model had nothing sensible to offer. */
+export interface ProductDraft {
+  description: string | null;
+  /** Comma separated, lowercase */
+  tags: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+}
+
+/** Payment reminder (customers) or payment message (suppliers) drafted from open documents. Nothing is sent. */
+export interface ReminderDraft {
+  partyName: string;
+  /** Total of the open documents, in minor units */
+  totalDue: number;
+  openCount: number;
+  overdueCount: number;
+  /** Days past due for the oldest overdue document, 0 when nothing is overdue */
+  oldestDaysOverdue: number;
+  subject: string;
+  message: string;
+}
+
+/** Suggested expense category per unmatched statement line. Lines with no clear category are left out. */
+export interface BankSuggestions {
+  suggestions: { lineId: string; categoryId: string; categoryName: string }[];
+}
+
 export interface Expense {
   id: string;
   number: string;
@@ -1489,4 +1553,121 @@ export interface PlatformShopDetail extends PlatformShop {
   users: PlatformShopUser[];
   usage: { locations: number; products: number; customers: number; invoices: number; lastInvoiceAt: number | null };
   orders: PlatformOrder[];
+}
+
+/** A product variant that needs ordering, from stock on hand and recent sales. */
+export interface ReorderItem {
+  variantId: string;
+  name: string;
+  sku: string | null;
+  onHand: number;
+  soldLast30: number;
+  /** null when nothing is on hand */
+  daysLeft: number | null;
+  suggestedQty: number;
+  status: "out" | "low";
+}
+
+export interface ReorderAdvice {
+  from: string;
+  to: string;
+  leadDays: number;
+  /** Most urgent first, capped */
+  items: ReorderItem[];
+  totalFlagged: number;
+  deadStock: { count: number; value: number };
+  /** Plain-language summary, or null when the AI stock model is not configured */
+  summary: string | null;
+}
+
+/** One finding from the pre-close checks. */
+export interface CloseFinding {
+  id: string;
+  severity: "high" | "medium" | "info";
+  title: string;
+  detail: string;
+  count: number;
+  /** Major units */
+  amount?: number;
+}
+
+export interface CloseReview {
+  from: string;
+  to: string;
+  findings: CloseFinding[];
+  /** Plain-language summary of the findings, or null when the AI review model is not configured */
+  summary: string | null;
+}
+
+/** "Ask your books": the answer, plus the report it was based on so the user can check the numbers. */
+export interface AiAnswer {
+  answer: string;
+  /** Name of the report tool that produced the data, or null if none applied */
+  tool: string | null;
+  data: Record<string, unknown> | null;
+}
+
+/** One AI feature as the business sees it. `available` is false when the server has no model for it. */
+export interface AiFeatureSetting {
+  key: AiFeature;
+  label: string;
+  description: string;
+  available: boolean;
+  enabled: boolean;
+}
+
+export interface AiSettings {
+  features: AiFeatureSetting[];
+}
+
+/** One week of the cash forecast. Amounts in minor units. */
+export interface CashForecastWeek {
+  from: string;
+  to: string;
+  /** Open customer invoices falling due this week (overdue ones land in the first week) */
+  collections: number;
+  /** Typical sales paid at the till, from the last 30 days */
+  salesReceipts: number;
+  /** Open supplier bills falling due this week (overdue ones land in the first week) */
+  bills: number;
+  /** Typical spending on expenses, from the last 90 days */
+  expenses: number;
+  endingCash: number;
+}
+
+export interface CashForecast {
+  asOf: string;
+  openingCash: number;
+  weeks: CashForecastWeek[];
+  lowest: { from: string; amount: number };
+  /** Short note from the model, or null when the AI summary is off or unavailable */
+  summary: string | null;
+}
+
+/** One thing that needs attention today. Only items the user may act on are returned. */
+export interface DailyAlert {
+  kind: "overdue_invoices" | "overdue_bills" | "bills_due_soon" | "low_stock";
+  severity: "urgent" | "soon";
+  title: string;
+  detail: string;
+  href: string;
+}
+
+/** One sale, void, refund or discount worth a look. Amounts in minor units. */
+export interface SalesReviewFlag {
+  kind: "void" | "refund" | "discount" | "below_cost" | "staff";
+  severity: "review" | "info";
+  title: string;
+  detail: string;
+  href: string;
+}
+
+export interface SalesReview {
+  from: string;
+  to: string;
+  invoices: number;
+  netSales: number;
+  flags: SalesReviewFlag[];
+  /** Short note from the model, or null when the AI note is off or unavailable */
+  summary: string | null;
 }

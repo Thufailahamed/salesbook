@@ -8,7 +8,7 @@ import type { Purchase, PurchaseReceiveInput, Supplier } from "@shopbooks/shared
 import { TENDER_LABELS } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { DetailSkeleton, ErrorState } from "@/components/loading";
-import { SectionCard } from "@/components/section-card";
+import { DocHero, DocPanel, GrandTotal, Timeline, TotalLine, TotalsBlock } from "@/components/doc-detail";
 import { KeyValue } from "@/components/key-value";
 import { Money } from "@/components/money";
 import { PaymentStatusBadge, PurchaseStatusBadge } from "@/components/status-badge";
@@ -30,7 +30,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useApiMutation, useApiQuery } from "@/hooks/use-api";
 import { useMoney } from "@/hooks/use-money";
 import { useSession } from "@/hooks/use-session";
@@ -134,111 +133,101 @@ function PurchaseView() {
         }
       />
 
+      {received ? (
+        <DocHero
+          eyebrow="Total billed"
+          value={money.format(p.total)}
+          progress={p.total > 0 ? Math.min(100, Math.round((p.amountPaid / p.total) * 100)) : 0}
+          progressLabel={p.amountDue > 0 ? `${money.format(p.amountDue)} still owed` : "Fully paid"}
+          stats={[
+            { label: "Paid", value: money.format(p.amountPaid) },
+            { label: "Balance due", value: p.amountDue > 0 ? money.format(p.amountDue) : "Settled", accent: p.amountDue > 0 },
+            { label: "Items", value: formatQty((p.lines ?? []).reduce((n, l) => n + l.quantity, 0)), sub: `${(p.lines ?? []).length} lines` },
+          ]}
+        />
+      ) : (
+        <DocHero
+          eyebrow={ordered ? "Order total" : "Total"}
+          value={money.format(p.total)}
+          stats={[
+            { label: "Supplier", value: p.supplierName ?? "—" },
+            { label: "Items", value: formatQty((p.lines ?? []).reduce((n, l) => n + l.quantity, 0)), sub: `${(p.lines ?? []).length} lines` },
+            { label: "Status", value: ordered ? "Awaiting goods" : p.status },
+          ]}
+        />
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="grid min-w-0 content-start gap-6 lg:col-span-2">
-          <SectionCard title="Items" flush>
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableHead>Item</TableHead>
-                  <TableHead align="right">Qty</TableHead>
-                  <TableHead align="right" className="hidden sm:table-cell">
-                    Unit cost
-                  </TableHead>
-                  <TableHead align="right" className="hidden md:table-cell">
-                    Landed cost
-                  </TableHead>
-                  <TableHead align="right">Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(p.lines ?? []).map((l) => (
-                  <TableRow key={l.id} className="hover:bg-transparent">
-                    <TableCell>
-                      <Link href={`/products/view?id=${l.productId}`} className="font-medium hover:underline">
-                        {l.name}
-                      </Link>
-                      <p className="text-xs text-muted-foreground">
-                        {l.sku}
-                        {l.expiryDate && <span className="font-sans"> · Expires {formatDate(l.expiryDate)}</span>}
-                        {l.quantityReturned > 0 && <span className="ml-1 text-warning">· {formatQty(l.quantityReturned)} returned</span>}
-                      </p>
-                    </TableCell>
-                    <TableCell numeric>{formatQty(l.quantity)}</TableCell>
-                    <TableCell numeric className="hidden sm:table-cell">
-                      <Money value={l.unitCost} />
-                    </TableCell>
-                    <TableCell numeric className="hidden text-muted-foreground md:table-cell">
-                      <Money value={l.landedUnitCost} />
-                    </TableCell>
-                    <TableCell numeric className="font-medium">
-                      <Money value={l.total} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="border-t border-border/70 px-6 py-4">
-              <dl className="ml-auto grid max-w-xs gap-1.5 text-sm">
-                <Row label="Subtotal" value={p.subtotal + p.itemDiscount} />
-                {p.discountTotal > 0 && <Row label="Discounts" value={-p.discountTotal} />}
-                <Row label={p.taxInclusive ? "Tax (included)" : "Tax"} value={p.taxTotal} />
-                {p.shipping > 0 && <Row label="Freight" value={p.shipping} />}
-                <div className="rule-double-top mt-1 flex justify-between pt-2 font-display text-lg font-semibold">
-                  <dt>Total</dt>
-                  <dd className="figure">{money.format(p.total)}</dd>
-                </div>
-                {received && (
-                  <>
-                    {p.amountReturned > 0 && <Row label="Returned" value={-p.amountReturned} />}
-                    <Row label="Paid" value={p.amountPaid} />
-                    {p.amountDue > 0 && (
-                      <div className="flex justify-between font-semibold text-destructive">
-                        <dt>Balance due</dt>
-                        <dd className="num">{money.format(p.amountDue)}</dd>
-                      </div>
-                    )}
-                  </>
-                )}
-              </dl>
-            </div>
-          </SectionCard>
+          <DocPanel title="Items" aside={<span className="label-caps text-muted-foreground">{(p.lines ?? []).length} lines</span>} flush>
+            <ul className="divide-y divide-border/60">
+              {(p.lines ?? []).map((l) => (
+                <li key={l.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 px-6 py-4">
+                  <span className="num flex size-11 items-center justify-center rounded-xl bg-muted font-display text-[15px] font-semibold">
+                    {formatQty(l.quantity)}
+                  </span>
+                  <div className="min-w-0">
+                    <Link href={`/products/view?id=${l.productId}`} className="block truncate font-medium hover:underline">
+                      {l.name}
+                    </Link>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted-foreground">
+                      {l.sku && <span className="font-mono text-[11.5px]">{l.sku}</span>}
+                      <span className="num">
+                        × <Money value={l.unitCost} />
+                      </span>
+                      {l.landedUnitCost !== l.unitCost && (
+                        <span className="num">
+                          landed <Money value={l.landedUnitCost} />
+                        </span>
+                      )}
+                      {l.expiryDate && <span>Expires {formatDate(l.expiryDate)}</span>}
+                      {l.quantityReturned > 0 && <span className="text-warning">{formatQty(l.quantityReturned)} returned</span>}
+                    </p>
+                  </div>
+                  <Money value={l.total} className="figure text-[15px] font-semibold" />
+                </li>
+              ))}
+            </ul>
+            <TotalsBlock>
+              <TotalLine label="Subtotal" value={<Money value={p.subtotal + p.itemDiscount} />} />
+              {p.discountTotal > 0 && <TotalLine label="Discounts" value={<Money value={-p.discountTotal} />} />}
+              <TotalLine label={p.taxInclusive ? "Tax (included)" : "Tax"} value={<Money value={p.taxTotal} />} muted={p.taxInclusive} />
+              {p.shipping > 0 && <TotalLine label="Freight" value={<Money value={p.shipping} />} />}
+              <GrandTotal label="Total" value={money.format(p.total)} />
+              {received && (
+                <>
+                  {p.amountReturned > 0 && <TotalLine label="Returned" value={<Money value={-p.amountReturned} />} />}
+                  <TotalLine label="Paid" value={<Money value={p.amountPaid} />} />
+                  {p.amountDue > 0 && <TotalLine label="Balance due" value={money.format(p.amountDue)} tone="danger" />}
+                </>
+              )}
+            </TotalsBlock>
+          </DocPanel>
 
           {received && (
-            <SectionCard title="Payments" flush>
-              {(p.payments ?? []).length === 0 ? (
-                <p className="px-6 py-5 text-[13px] text-muted-foreground">No payments yet.</p>
-              ) : (
-                <Table>
-                  <TableBody>
-                    {p.payments!.map((pm) => (
-                      <TableRow key={pm.id} className="hover:bg-transparent">
-                        <TableCell>
-                          <p className="font-medium">
-                            {pm.methodName ?? TENDER_LABELS[pm.tender]}
-                            {pm.status === "void" && (
-                              <Badge variant="neutral" className="ml-2">
-                                Void
-                              </Badge>
-                            )}
-                          </p>
-                          <p className="font-mono text-[11.5px] text-muted-foreground">{[pm.number, pm.reference].filter(Boolean).join(" · ")}</p>
-                        </TableCell>
-                        <TableCell className="hidden text-muted-foreground sm:table-cell">{formatDate(pm.date)}</TableCell>
-                        <TableCell numeric className="font-medium">
-                          <Money value={pm.allocations.find((a) => a.docId === p.id)?.amount ?? pm.amount} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </SectionCard>
+            <DocPanel title="Payments" aside={<span className="label-caps text-muted-foreground">{(p.payments ?? []).length} recorded</span>} flush>
+              <Timeline
+                empty="No payments yet."
+                entries={(p.payments ?? []).map((pm) => ({
+                  id: pm.id,
+                  voided: pm.status === "void",
+                  title: pm.methodName ?? TENDER_LABELS[pm.tender],
+                  badge: pm.status === "void" ? (
+                    <Badge variant="neutral" className="ml-2">
+                      Void
+                    </Badge>
+                  ) : null,
+                  reference: [pm.number, pm.reference].filter(Boolean).join(" · ") || undefined,
+                  date: formatDate(pm.date),
+                  amount: <Money value={pm.allocations.find((a) => a.docId === p.id)?.amount ?? pm.amount} />,
+                }))}
+              />
+            </DocPanel>
           )}
         </div>
 
         <div className="grid content-start gap-6">
-          <SectionCard title="Details">
+          <DocPanel title="Details">
             <KeyValue
               items={[
                 {
@@ -259,13 +248,13 @@ function PurchaseView() {
                 { label: "Note", value: p.note ? <span className="whitespace-pre-line">{p.note}</span> : null, hideEmpty: true },
               ]}
             />
-          </SectionCard>
+          </DocPanel>
           {(p.returns?.length ?? 0) > 0 && (
-            <SectionCard title="Returns" flush>
-              <ul className="divide-y divide-border/70">
+            <DocPanel title="Returns" flush>
+              <ul className="divide-y divide-border/60">
                 {p.returns!.map((r) => (
                   <li key={r.id}>
-                    <Link href={`/purchases/returns/view?id=${r.id}`} className="flex items-center justify-between px-6 py-3 text-sm hover:bg-muted/40">
+                    <Link href={`/purchases/returns/view?id=${r.id}`} className="flex items-center justify-between px-6 py-3.5 text-sm transition-colors hover:bg-muted/50">
                       <span>
                         <span className="font-mono text-[12.5px] font-medium">{r.number}</span>
                         <span className="ml-2 text-muted-foreground">{formatDate(r.date)}</span>
@@ -275,7 +264,7 @@ function PurchaseView() {
                   </li>
                 ))}
               </ul>
-            </SectionCard>
+            </DocPanel>
           )}
         </div>
       </div>
@@ -283,17 +272,6 @@ function PurchaseView() {
       {ordered && <ReceiveDialog open={receiveOpen} onOpenChange={setReceiveOpen} purchase={p} />}
       {received && p.amountDue > 0 && <PayDialog open={payOpen} onOpenChange={setPayOpen} purchase={p} />}
     </>
-  );
-}
-
-function Row({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex justify-between">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd>
-        <Money value={value} />
-      </dd>
-    </div>
   );
 }
 

@@ -22,15 +22,12 @@ export function EmptyState({ icon: Icon = Inbox, title, description, action, cla
         className,
       )}
     >
-      <div className="relative mb-2 flex size-20 items-center justify-center rounded-full bg-[radial-gradient(circle,var(--muted)_0%,transparent_70%)]">
-        <div className="absolute inset-0 rounded-full border border-border/60" />
-        <div className="absolute inset-2.5 rounded-full border border-border" />
-        <div className="relative flex size-11 items-center justify-center rounded-full bg-card text-foreground shadow-card">
-          <Icon className="size-[18px]" strokeWidth={1.6} />
-        </div>
+      <div className="relative mb-2 flex size-16 items-center justify-center rounded-2xl bg-muted ring-1 ring-border/70">
+        <div className="absolute -inset-2 -z-10 rounded-[28px] bg-[radial-gradient(circle,var(--primary-soft)_0%,transparent_70%)] opacity-70" />
+        <Icon className="size-[22px] text-primary" strokeWidth={1.6} />
       </div>
-      <div className="space-y-1">
-        <p className="font-display text-[16px] font-semibold tracking-[-0.03em] text-foreground">{title}</p>
+      <div className="space-y-1.5">
+        <p className="font-display text-[17px] font-semibold tracking-[-0.02em] text-foreground">{title}</p>
         {description && <p className="mx-auto max-w-sm text-[13px] text-muted-foreground">{description}</p>}
       </div>
       {action && <div className="mt-2 flex flex-wrap items-center justify-center gap-2">{action}</div>}

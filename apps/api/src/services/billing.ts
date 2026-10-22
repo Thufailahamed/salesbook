@@ -11,6 +11,7 @@ import type {
   SignupInput,
   SubscriptionInfo,
 } from "@shopbooks/shared";
+import { TRIAL_DAYS } from "@shopbooks/shared";
 import type { DB } from "../db/client";
 import { businesses, locations, plans, platformOrders, platformSettings, users } from "../db/schema";
 import type { Env } from "../env";
@@ -119,6 +120,19 @@ export async function publicPlans(db: DB) {
   const [s, rows] = await Promise.all([loadSettings(db), db.select().from(plans).where(eq(plans.isActive, true))]);
   rows.sort((a, b) => a.sortOrder - b.sortOrder || a.priceCents - b.priceCents);
   return { paymentRequired: !!(s?.requirePayment && s.isEnabled), plans: rows.map((p) => mapPlan(p)) };
+}
+
+/**
+ * Plan for a free (no-payment) signup: the requested plan, or the first active plan when none is given,
+ * so shops can't skip plans by calling the API directly. Paid plans start a TRIAL_DAYS trial; free plans
+ * never expire. Returns undefined when no plans are set up (legacy behaviour: no plan, never expires).
+ */
+export async function trialSubscription(db: DB, planId: string | null | undefined, now = Date.now()) {
+  const { plans: active } = await publicPlans(db);
+  if (!active.length) return undefined;
+  const plan = planId ? active.find((p) => p.id === planId) : active[0];
+  if (!plan) throw badRequest("That plan is not available");
+  return { planId: plan.id, endsAt: plan.priceCents > 0 ? now + TRIAL_DAYS * DAY : null };
 }
 
 // ---------------------------------------------------------------- payments.lk calls

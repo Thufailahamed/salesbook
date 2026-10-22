@@ -3,8 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Archive, ArchiveRestore, MoreHorizontal, PackageMinus, Pencil, RotateCcw, ShoppingBag, Wallet, WalletCards } from "lucide-react";
-import type { Paginated, Purchase, PurchaseReturn, Supplier } from "@shopbooks/shared";
+import { Archive, ArchiveRestore, MoreHorizontal, PackageMinus, Pencil, RotateCcw, ShoppingBag, Sparkles, Wallet, WalletCards } from "lucide-react";
+import type { AiStatus, Paginated, Purchase, PurchaseReturn, Supplier } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { DetailSkeleton, ErrorState } from "@/components/loading";
 import { StatCard } from "@/components/stat-card";
@@ -17,6 +17,7 @@ import { ActiveBadge, PaymentStatusBadge, PurchaseStatusBadge } from "@/componen
 import { StatementCard } from "@/components/statement-card";
 import { useConfirm } from "@/components/confirm-dialog";
 import { ApplyCreditDialog, CreditRefundDialog, PartyPaymentDialog, SupplierFormDialog } from "@/components/party-dialogs";
+import { ReminderDraftDialog } from "@/components/reminder-draft-dialog";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,6 +53,8 @@ function SupplierView() {
   const [payOpen, setPayOpen] = React.useState(false);
   const [applyOpen, setApplyOpen] = React.useState(false);
   const [refundOpen, setRefundOpen] = React.useState(false);
+  const [reminderOpen, setReminderOpen] = React.useState(false);
+  const aiStatus = useApiQuery<AiStatus>("/ai/status", undefined, { staleTime: Infinity });
 
   const setActive = useApiMutation(
     (active: boolean) =>
@@ -103,6 +106,11 @@ function SupplierView() {
                 <Link href={`/purchases/new?supplierId=${s.id}`}>
                   <ShoppingBag /> New purchase
                 </Link>
+              </Button>
+            )}
+            {aiStatus.data?.reminderDraft && s.dueBalance > 0 && (
+              <Button variant="outline" onClick={() => setReminderOpen(true)}>
+                <Sparkles /> Draft message
               </Button>
             )}
             {canManage && s.dueBalance > 0 && (
@@ -226,6 +234,7 @@ function SupplierView() {
 
       <SupplierFormDialog open={editOpen} onOpenChange={setEditOpen} supplier={s} />
       <PartyPaymentDialog open={payOpen} onOpenChange={setPayOpen} kind="supplier" partyId={s.id} partyName={s.name} balance={s.dueBalance} />
+      <ReminderDraftDialog open={reminderOpen} onOpenChange={setReminderOpen} kind="supplier" partyId={s.id} />
       <ApplyCreditDialog open={applyOpen} onOpenChange={setApplyOpen} kind="supplier" partyId={s.id} credit={s.creditBalance} />
       <CreditRefundDialog open={refundOpen} onOpenChange={setRefundOpen} kind="supplier" partyId={s.id} credit={s.creditBalance} />
     </>

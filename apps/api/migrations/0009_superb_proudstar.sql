@@ -1,0 +1,1 @@
+ALTER TABLE `businesses` ADD `ai_disabled` text DEFAULT '[]' NOT NULL;

@@ -196,6 +196,15 @@ try {
 
   // leave the instance open for free signups again (other scripts rely on it)
   ok((await call("PUT", "/platform/settings", { token: T, body: { requirePayment: false, isEnabled: true } })).status === 200, "admin can reopen free signup");
+
+  console.log("Free signup on a trial");
+  const trialBody = (planId) => ({ businessName: "Trial", name: "T", email: `t+${Date.now()}${Math.random()}@shop.test`, password: "password123", currency: "LKR", timezone: "Asia/Colombo", ...(planId === undefined ? {} : { planId }) });
+  const trial = await call("POST", "/auth/signup", { body: trialBody(pro.id) });
+  const tsub = trial.json.subscription;
+  ok(trial.status === 201 && tsub?.planId === pro.id && tsub.state === "active" && tsub.daysLeft === 14, "signup with a plan starts a 14-day trial");
+  const dflt = await call("POST", "/auth/signup", { body: trialBody(undefined) });
+  ok(dflt.status === 201 && dflt.json.subscription?.planId === pro.id, "signup without planId defaults to the active plan");
+  ok((await call("POST", "/auth/signup", { body: trialBody(basic.id) })).status === 400, "inactive plan refused at signup");
   await call("POST", "/platform/auth/logout", { token: T });
   ok((await call("GET", "/platform/stats", { token: T })).status === 401, "admin logout revokes the session");
 } catch (e) {

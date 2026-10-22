@@ -11,7 +11,46 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useApiQuery } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
-import { downloadFile, toCSV } from "@/lib/utils";
+import { cn, downloadFile, toCSV } from "@/lib/utils";
+
+/**
+ * Panel used by every report body: borderless soft card, display title, optional footer.
+ * `flush` removes body padding for tables that run edge to edge.
+ */
+export function ReportSection({
+  title,
+  description,
+  action,
+  flush,
+  footer,
+  className,
+  children,
+}: {
+  title?: React.ReactNode;
+  description?: React.ReactNode;
+  action?: React.ReactNode;
+  flush?: boolean;
+  footer?: React.ReactNode;
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  const hasHeader = title || description || action;
+  return (
+    <section className={cn("overflow-hidden rounded-3xl bg-card shadow-card", className)}>
+      {hasHeader && (
+        <header className={cn("flex items-start justify-between gap-4 px-6 pt-5", flush ? "border-b border-border/60 pb-4" : "pb-4")}>
+          <div className="min-w-0">
+            {title && <h2 className="font-display text-[17px] font-semibold tracking-[-0.01em]">{title}</h2>}
+            {description && <p className="mt-0.5 text-[13px] text-muted-foreground">{description}</p>}
+          </div>
+          {action}
+        </header>
+      )}
+      <div className={cn(!flush && "px-6 pb-6")}>{children}</div>
+      {footer && <footer className="border-t border-border/60 bg-muted/35 px-6 py-4">{footer}</footer>}
+    </section>
+  );
+}
 
 export interface ReportControls {
   /** Period range (from/to) */
@@ -83,11 +122,11 @@ export function ReportPage<T>({
           </>
         }
       >
-        <div className="no-print flex flex-wrap items-center gap-2">
+        <div className="no-print flex flex-wrap items-center gap-2 rounded-2xl bg-card p-2 shadow-card">
           {controls.range && <DateRangePicker value={range} onChange={(r) => setRange(r.from ? r : presetRange("month", today))} allowAll={false} />}
           {controls.asOf && (
-            <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              As of
+            <label className="flex items-center gap-2 pl-2 text-[13px] text-muted-foreground">
+              <span className="label-caps">As of</span>
               <Input type="date" value={asOf} max={today} onChange={(e) => setAsOf(e.target.value || today)} className="w-40" />
             </label>
           )}
@@ -97,9 +136,13 @@ export function ReportPage<T>({
       {error && !data ? (
         <ErrorState message={error.message} onRetry={() => refetch()} />
       ) : isLoading || !data ? (
-        <div className="grid gap-4">
-          <Skeleton className="h-28 rounded-2xl" />
-          <Skeleton className="h-80 rounded-2xl" />
+        <div className="grid gap-6">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-28 rounded-2xl" />
+            ))}
+          </div>
+          <Skeleton className="h-80 rounded-3xl" />
         </div>
       ) : (
         children(data, { from: range.from, to: range.to, asOf })

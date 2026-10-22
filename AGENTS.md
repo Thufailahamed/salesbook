@@ -27,7 +27,7 @@ npm run dev:api                              # http://localhost:8787  (wrangler 
 npm run dev:web                              # http://localhost:3000  (apps/web/.env.local: NEXT_PUBLIC_API_URL=http://localhost:8787)
 npm run build -w @shopbooks/web              # static export → apps/web/out
 node scripts/e2e.mjs http://localhost:8787   # full scenario + reconciliation (needs a fresh-ish local DB is fine; it signs up a new business each run)
-npm run deploy                               # build web + wrangler deploy (see README for D1/R2 setup)
+npm run deploy                               # scripts/deploy.mjs: checks, build, remote migrations, deploy, smoke test
 ```
 
 Windows note: the dev machine is Windows 11. Prefer the PowerShell tool or Node scripts for multi-line file

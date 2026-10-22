@@ -3,8 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Ban, ChartColumn, Plus, Wallet } from "lucide-react";
-import type { Expense, ExpenseInput, Paginated } from "@shopbooks/shared";
+import { Ban, ChartColumn, Plus, ScanLine, Wallet } from "lucide-react";
+import type { AiStatus, Expense, ExpenseInput, Paginated, ReceiptScan } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { DataTable, type Column } from "@/components/data-table";
 import { DateRangePicker, FilterSelect, SearchInput, useBusinessToday, type DateRange } from "@/components/filters";
@@ -52,6 +52,18 @@ function ExpensesPage() {
   const [accountId, setAccountId] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | undefined>(undefined);
   const [createOpen, setCreateOpen] = React.useState(params.get("new") === "1");
+  const prefill = React.useMemo<ExpensePrefill | null>(() => {
+    const accountId = params.get("accountId");
+    if (!accountId) return null;
+    return {
+      accountId,
+      methodId: params.get("methodId"),
+      amount: Number(params.get("amount")) || 0,
+      date: params.get("date") ?? "",
+      payee: params.get("payee") ?? "",
+      note: params.get("note") ?? "",
+    };
+  }, [params]);
   const [selectedId, setSelectedId] = React.useState<string | null>(params.get("id"));
   const { data, isLoading, isFetching } = useApiQuery<ExpenseList>("/expenses", {
     page,
@@ -176,6 +188,7 @@ function ExpensesPage() {
         }
       />
       <ExpenseDialog
+        prefill={prefill}
         open={createOpen}
         onOpenChange={(o) => {
           setCreateOpen(o);
@@ -195,30 +208,73 @@ function ExpensesPage() {
   );
 }
 
-function ExpenseDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+/** Values from the URL, e.g. when recording an expense from a bank statement line. */
+interface ExpensePrefill {
+  accountId: string;
+  methodId: string | null;
+  amount: number;
+  date: string;
+  payee: string;
+  note: string;
+}
+
+function ExpenseDialog({
+  open,
+  onOpenChange,
+  prefill,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  prefill: ExpensePrefill | null;
+}) {
   const today = useBusinessToday();
   const defaultMethod = useDefaultMethodId();
   const { locationId: sessionLocation, activeLocations } = useSession();
   const blank = React.useCallback(
     () => ({
-      date: today,
-      accountId: null as string | null,
-      amount: 0,
+      date: prefill?.date || today,
+      accountId: (prefill?.accountId ?? null) as string | null,
+      amount: prefill?.amount ?? 0,
       taxAmount: 0,
-      methodId: defaultMethod,
+      methodId: prefill?.methodId ?? defaultMethod,
       supplierId: null as string | null,
-      payee: "",
+      payee: prefill?.payee ?? "",
       reference: "",
-      note: "",
+      note: prefill?.note ?? "",
       locationId: sessionLocation as string | undefined,
     }),
-    [today, defaultMethod, sessionLocation],
+    [today, defaultMethod, sessionLocation, prefill],
   );
   const [f, setF] = React.useState(blank);
+  const fileRef = React.useRef<HTMLInputElement>(null);
   React.useEffect(() => {
-    if (open) setF(blank());
+    if (open) {
+      setF(blank());
+      setScanned(null);
+    }
   }, [open, blank]);
   const set = <K extends keyof ReturnType<typeof blank>>(k: K, v: ReturnType<typeof blank>[K]) => setF((p) => ({ ...p, [k]: v }));
+  const aiStatus = useApiQuery<AiStatus>("/ai/status", undefined, { staleTime: Infinity });
+  const [scanned, setScanned] = React.useState<ReceiptScan | null>(null);
+  const scan = useApiMutation((file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.form<ReceiptScan>("/ai/receipt", form);
+  }, {
+    onSuccess: (r) => {
+      setScanned(r);
+      setF((p) => ({
+        ...p,
+        date: r.date ?? p.date,
+        payee: r.payee ?? p.payee,
+        amount: r.amount ?? p.amount,
+        taxAmount: r.taxAmount ?? p.taxAmount,
+        reference: r.reference ?? p.reference,
+        note: r.note ?? p.note,
+        accountId: r.accountId ?? p.accountId,
+      }));
+    },
+  });
 
   const save = useApiMutation((body: ExpenseInput) => api.post<Expense>("/expenses", body), {
     invalidate: INVALIDATE,
@@ -254,6 +310,29 @@ function ExpenseDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
             <DialogDescription>Paid immediately from the chosen payment method.</DialogDescription>
           </DialogHeader>
           <DialogBody className="grid gap-4">
+            {aiStatus.data?.receiptScan && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed p-3">
+                <p className="text-sm text-muted-foreground">
+                  {scanned
+                    ? `Filled from the receipt (${scanned.confidence} confidence). Check it before recording.`
+                    : "Upload a receipt photo to fill this form."}
+                </p>
+                <Button type="button" variant="outline" size="sm" loading={scan.isPending} onClick={() => fileRef.current?.click()}>
+                  <ScanLine /> Scan receipt
+                </Button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) scan.mutate(file);
+                  }}
+                />
+              </div>
+            )}
             <FieldGrid>
               <Field label="Category" required className="sm:col-span-2">
                 <AccountPicker value={f.accountId} onChange={(id) => set("accountId", id)} types={["expense"]} placeholder="Rent, utilities, salaries…" />

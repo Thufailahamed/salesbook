@@ -2,6 +2,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, lt, or, sql,
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  closeReviewSchema,
   ACCOUNT_SUBTYPES,
   accountSchema,
   booksLockSchema,
@@ -30,6 +31,7 @@ import { likeQ, pageParams, paged } from "../lib/http";
 import { newId } from "../lib/ids";
 import { vJson, vQuery } from "../lib/validate";
 import { getJournalDto, journalSelect, mapAccount, mapJournalEntry } from "../services/accounting-read";
+import { reviewClose } from "../services/close-review";
 import { accountSums, num, type AccountRow } from "../services/reports-utils";
 import type { Stmt } from "../lib/batch";
 import { assertReconcilable, DEPRECIATION_ACCOUNTS, ensureAccount } from "../services/ledger-accounts";
@@ -298,6 +300,12 @@ app.post("/depreciation", manage, vJson(depreciationSchema), async (c) => {
   tx.audit("journal.depreciation", `Depreciation ${input.amount}: ${input.memo}`, "journal", id);
   await tx.commit();
   return c.json(await getJournalDto(ctx, id!), 201);
+});
+
+// ---------------------------------------------------------------- pre-close review
+
+app.post("/close-review", view, vJson(closeReviewSchema), async (c) => {
+  return c.json(await reviewClose(c.get("ctx"), c.env, c.req.valid("json")));
 });
 
 // ---------------------------------------------------------------- books lock

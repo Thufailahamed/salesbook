@@ -246,6 +246,7 @@ function sellableSelect(ctx: Ctx, locationId?: string) {
     .select({
       v: variants,
       productName: products.name,
+      productTags: products.tags,
       type: products.type,
       trackInventory: products.trackInventory,
       taxRateId: products.taxRateId,
@@ -348,4 +349,42 @@ export async function lookupSellable(ctx: Ctx, code: string, locationId?: string
   if (!rows[0]) throw notFound("Product");
   const promos = await promotionsFor(ctx, [{ variantId: rows[0].v.id, productId: rows[0].v.productId }]);
   return mapSellable(rows[0], promos.get(rows[0].v.id) ?? null);
+}
+
+/**
+ * Sellable variants matching any of the terms, most matching terms first. Used by the AI product search when the
+ * normal search finds nothing. Short terms (sizes like "M") only count as whole words, so they don't match everything.
+ */
+export async function searchSellableByTerms(
+  ctx: Ctx,
+  q: { terms: string[]; locationId?: string; limit: number },
+): Promise<SellableItem[]> {
+  const terms = [...new Set(q.terms.map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 1))].slice(0, 12);
+  if (terms.length === 0) return [];
+  const ors = terms.map((t) => {
+    const like = likeQ(t);
+    return sql`(${products.name} LIKE ${like} OR ${variants.name} LIKE ${like} OR ${variants.sku} LIKE ${like} OR ${variants.barcode} LIKE ${like} OR ${products.tags} LIKE ${like})`;
+  });
+  const rows = await sellableSelect(ctx, q.locationId)
+    .where(
+      and(
+        eq(variants.businessId, ctx.businessId),
+        eq(variants.isActive, true),
+        eq(products.isActive, true),
+        sql`${products.type} <> 'service'`,
+        sql`(${sql.join(ors, sql` OR `)})`,
+      ),
+    )
+    .limit(300);
+
+  const matches = (hay: string, t: string) =>
+    t.length <= 2 ? new RegExp(`(^|[^a-z0-9])${t.replace(/[^a-z0-9]/g, "")}($|[^a-z0-9])`).test(hay) : hay.includes(t);
+  const scored = rows.map((r) => {
+    const hay = `${r.productName} ${r.productTags ?? ""} ${r.v.name} ${r.v.sku ?? ""} ${r.v.barcode ?? ""}`.toLowerCase();
+    return { r, score: terms.filter((t) => matches(hay, t)).length };
+  });
+  scored.sort((a, b) => b.score - a.score || a.r.productName.localeCompare(b.r.productName));
+  const top = scored.filter((s) => s.score > 0).slice(0, q.limit);
+  const promos = await promotionsFor(ctx, top.map((s) => ({ variantId: s.r.v.id, productId: s.r.v.productId })));
+  return top.map((s) => mapSellable(s.r, promos.get(s.r.v.id) ?? null));
 }

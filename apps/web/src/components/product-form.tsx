@@ -2,10 +2,11 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ImagePlus, Layers, Package, Plus, Trash2, Wrench, X } from "lucide-react";
+import { ImagePlus, Layers, Package, Plus, Sparkles, Trash2, Wrench, X } from "lucide-react";
 import { toast } from "sonner";
-import type { Brand, Category, Product, ProductInput, Unit, VariantInput } from "@shopbooks/shared";
+import type { AiStatus, Brand, Category, Product, ProductDraft, ProductInput, Unit, VariantInput } from "@shopbooks/shared";
 import { SectionCard } from "@/components/section-card";
+import { BarcodeInput } from "@/components/barcode-input";
 import { Field, FieldGrid, ToggleRow } from "@/components/form-field";
 import { MoneyInput } from "@/components/money-input";
 import { QtyInput } from "@/components/qty-input";
@@ -113,11 +114,23 @@ function ChipInput({ values, onChange, placeholder }: { values: string[]; onChan
   );
 }
 
-export function ProductForm({ product }: { product?: Product }) {
+export function ProductForm({ product, initialBarcode }: { product?: Product; initialBarcode?: string }) {
   const router = useRouter();
   const { business, locationId: sessionLocationId } = useSession();
   const editing = !!product;
   const categories = useApiQuery<Category[]>("/categories", undefined, { staleTime: 60_000 });
+  const aiStatus = useApiQuery<AiStatus>("/ai/status", undefined, { staleTime: Infinity });
+  const [draftNote, setDraftNote] = React.useState<string | null>(null);
+  // Fills only the fields that are still empty, so nothing the user typed is overwritten.
+  const draft = useApiMutation((productName: string) => api.post<ProductDraft>("/ai/product-draft", { name: productName }), {
+    errorToast: true,
+    onSuccess: (d) => {
+      if (d.description && !description.trim()) setDescription(d.description);
+      if (d.tags && !tags.trim()) setTags(d.tags);
+      if (d.categoryId && !categoryId) setCategoryId(d.categoryId);
+      setDraftNote("Drafted with AI. Check it before saving.");
+    },
+  });
   const brands = useApiQuery<Brand[]>("/brands", undefined, { staleTime: 60_000 });
   const units = useApiQuery<Unit[]>("/units", undefined, { staleTime: 60_000 });
 
@@ -153,7 +166,7 @@ export function ProductForm({ product }: { product?: Product }) {
             isActive: v.isActive,
             openingStock: 0,
           }))
-      : [blankVariant()],
+      : [{ ...blankVariant(), barcode: initialBarcode ?? "" }],
   );
   const [openingLocationId, setOpeningLocationId] = React.useState<string | undefined>(sessionLocationId || undefined);
   const [uploading, setUploading] = React.useState(false);
@@ -265,7 +278,25 @@ export function ProductForm({ product }: { product?: Product }) {
             <Field label="Product name" htmlFor="p-name" required error={errors.name}>
               <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus={!editing} aria-invalid={!!errors.name || undefined} />
             </Field>
-            <Field label="Description" htmlFor="p-desc">
+            <Field
+              label="Description"
+              htmlFor="p-desc"
+              labelAside={
+                aiStatus.data?.productDraft ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={!name.trim()}
+                    loading={draft.isPending}
+                    onClick={() => draft.mutate(name.trim())}
+                  >
+                    <Sparkles /> Draft with AI
+                  </Button>
+                ) : undefined
+              }
+              hint={draftNote ?? undefined}
+            >
               <Textarea id="p-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
             </Field>
             <RadioGroup value={type} onValueChange={(v) => setType(v as "standard" | "service")} className="grid gap-3 sm:grid-cols-2">
@@ -314,7 +345,7 @@ export function ProductForm({ product }: { product?: Product }) {
                   <Input id="p-sku" className="font-mono" value={simple.sku} onChange={(e) => updateVariant(0, { sku: e.target.value })} />
                 </Field>
                 <Field label="Barcode" htmlFor="p-barcode">
-                  <Input id="p-barcode" className="font-mono" value={simple.barcode} onChange={(e) => updateVariant(0, { barcode: e.target.value })} />
+                  <BarcodeInput id="p-barcode" productId={product?.id} value={simple.barcode} onChange={(v) => updateVariant(0, { barcode: v })} />
                 </Field>
               </FieldGrid>
               {tracks && (
@@ -427,7 +458,7 @@ export function ProductForm({ product }: { product?: Product }) {
                               <Input className="h-8 font-mono text-[12.5px]" placeholder="auto" value={v.sku} onChange={(e) => updateVariant(i, { sku: e.target.value })} />
                             </TableCell>
                             <TableCell className="min-w-32">
-                              <Input className="h-8 font-mono text-[12.5px]" value={v.barcode} onChange={(e) => updateVariant(i, { barcode: e.target.value })} />
+                              <BarcodeInput compact productId={product?.id} value={v.barcode} onChange={(x) => updateVariant(i, { barcode: x })} />
                             </TableCell>
                             <TableCell className="min-w-28">
                               <MoneyInput hideSymbol className="h-8 text-right" value={v.price} onChange={(x) => updateVariant(i, { price: x })} />

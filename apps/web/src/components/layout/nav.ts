@@ -8,6 +8,7 @@ import {
   BookOpen,
   Boxes,
   ChartColumn,
+  CircleHelp,
   FileText,
   Gift,
   History,
@@ -52,6 +53,7 @@ export const NAV: NavGroup[] = [
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "dashboard.view", keywords: ["home", "kpi"] },
       { label: "Point of sale", href: "/pos", icon: ShoppingCart, permission: "pos.sell", keywords: ["pos", "sell", "checkout", "register", "till"] },
+      { label: "Help", href: "/help", icon: CircleHelp, keywords: ["how to", "guide", "support", "assistant", "tutorial"] },
     ],
   },
   {

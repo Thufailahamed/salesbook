@@ -8,7 +8,6 @@ import type { Customer, GatewayCheckout, Invoice, InvoicePaymentInput, TenderInp
 import { TENDER_LABELS } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { DetailSkeleton, ErrorState } from "@/components/loading";
-import { SectionCard } from "@/components/section-card";
 import { KeyValue } from "@/components/key-value";
 import { Money } from "@/components/money";
 import { InvoiceStatusBadge, PaymentStatusBadge } from "@/components/status-badge";
@@ -31,13 +30,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useApiMutation, useApiQuery } from "@/hooks/use-api";
 import { useMoney } from "@/hooks/use-money";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { formatDate, formatDateTime, formatQty } from "@/lib/utils";
+import { cn, formatDate, formatDateTime, formatQty } from "@/lib/utils";
 
 export default function Page() {
   return (
@@ -87,6 +85,9 @@ function InvoiceView() {
   const canPay = can("customers.payments") && !isVoid && inv.amountDue > 0;
   const canVoid = can("sales.void") && !isVoid && inv.amountReturned === 0 && !inv.exchangeReturnId;
   const print = (format?: "receipt") => window.open(`/print/invoice?id=${inv.id}${format ? "&format=receipt" : ""}&autoprint=1`, "_blank");
+  const paidPct = inv.total > 0 ? Math.min(100, Math.round((inv.amountPaid / inv.total) * 100)) : 0;
+  const grossProfit = inv.netTotal - inv.costTotal;
+  const marginPct = inv.netTotal ? Math.round((grossProfit / inv.netTotal) * 100) : 0;
 
   return (
     <>
@@ -111,7 +112,7 @@ function InvoiceView() {
               </Button>
             )}
             {canPay && (
-              <Button onClick={() => setPayOpen(true)}>
+              <Button variant="ink" onClick={() => setPayOpen(true)}>
                 <HandCoins /> Receive payment
               </Button>
             )}
@@ -164,69 +165,94 @@ function InvoiceView() {
         </div>
       )}
 
+      {/* Signature "black card": the invoice total, settlement progress and headline numbers. */}
+      <section
+        className={cn(
+          "metal relative mb-6 overflow-hidden rounded-3xl p-6 text-white sm:p-8",
+          isVoid && "opacity-60 saturate-50",
+        )}
+      >
+        <div className="grid gap-8">
+          <div className="min-w-0">
+            <p className="eyebrow text-white/50">Invoice total</p>
+            <p className="figure mt-3 text-4xl leading-none text-gold sm:text-5xl">{money.format(inv.total)}</p>
+
+            <div className="mt-7">
+              <div className="flex items-center justify-between text-[13px] text-white/60">
+                <span>{isVoid ? "Voided" : paidPct >= 100 ? "Fully settled" : `${paidPct}% settled`}</span>
+                <span className="num">{inv.payments?.length ?? 0} payment{(inv.payments?.length ?? 0) === 1 ? "" : "s"}</span>
+              </div>
+              <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-highlight/70 to-highlight transition-[width] duration-700"
+                  style={{ width: `${isVoid ? 0 : paidPct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <dl className="grid gap-px overflow-hidden rounded-2xl bg-white/10 ring-1 ring-white/10 sm:grid-cols-3">
+            <HeroStat label="Paid" value={money.format(inv.amountPaid)} />
+            <HeroStat
+              label="Balance due"
+              value={isVoid ? "—" : inv.amountDue > 0 ? money.format(inv.amountDue) : "Settled"}
+              accent={!isVoid && inv.amountDue > 0}
+            />
+            {can("reports.view") && !isVoid && <HeroStat label="Gross profit" value={money.format(grossProfit)} sub={`${marginPct}% margin`} />}
+          </dl>
+        </div>
+      </section>
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="grid min-w-0 content-start gap-6 lg:col-span-2">
-          <SectionCard title="Items" flush>
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableHead>Item</TableHead>
-                  <TableHead align="right">Qty</TableHead>
-                  <TableHead align="right" className="hidden sm:table-cell">
-                    Price
-                  </TableHead>
-                  <TableHead align="right" className="hidden md:table-cell">
-                    Discount
-                  </TableHead>
-                  <TableHead align="right" className="hidden lg:table-cell">
-                    Tax
-                  </TableHead>
-                  <TableHead align="right">Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lines.map((l) => (
-                  <TableRow key={l.id} className="hover:bg-transparent">
-                    <TableCell>
+          <Panel title="Items" aside={<span className="label-caps text-muted-foreground">{lines.length} {lines.length === 1 ? "line" : "lines"}</span>}>
+            <ul className="divide-y divide-border/60">
+              {lines.map((l) => {
+                const discount = l.lineDiscount + l.docDiscount;
+                return (
+                  <li key={l.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 px-6 py-4">
+                    <span className="num flex size-11 items-center justify-center rounded-xl bg-muted font-display text-[15px] font-semibold">
+                      {formatQty(l.quantity)}
+                    </span>
+                    <div className="min-w-0">
                       {l.productId ? (
-                        <Link href={`/products/view?id=${l.productId}`} className="font-medium hover:underline">
+                        <Link href={`/products/view?id=${l.productId}`} className="block truncate font-medium hover:underline">
                           {l.name}
                         </Link>
                       ) : (
-                        <p className="font-medium">{l.name}</p>
+                        <p className="truncate font-medium">{l.name}</p>
                       )}
-                      <p className="text-xs text-muted-foreground">
-                        {[l.sku, l.note].filter(Boolean).join(" · ")}
-                        {l.quantityReturned > 0 && <span className="ml-1 text-warning">· {formatQty(l.quantityReturned)} returned</span>}
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted-foreground">
+                        {l.sku && <span className="font-mono text-[11.5px]">{l.sku}</span>}
+                        <span className="num">
+                          × <Money value={l.unitPrice} />
+                        </span>
+                        {discount > 0 && (
+                          <span className="num">
+                            − <Money value={discount} />
+                          </span>
+                        )}
+                        {l.taxRate ? <span className="rounded-md bg-muted px-1.5 py-px text-[11px]">{l.taxRate}% tax</span> : null}
+                        {l.note && <span className="italic">{l.note}</span>}
+                        {l.quantityReturned > 0 && <span className="text-warning">{formatQty(l.quantityReturned)} returned</span>}
                       </p>
-                    </TableCell>
-                    <TableCell numeric>{formatQty(l.quantity)}</TableCell>
-                    <TableCell numeric className="hidden sm:table-cell">
-                      <Money value={l.unitPrice} />
-                    </TableCell>
-                    <TableCell numeric className="hidden md:table-cell">
-                      <Money value={l.lineDiscount + l.docDiscount} dashZero />
-                    </TableCell>
-                    <TableCell numeric className="hidden text-muted-foreground lg:table-cell">
-                      {l.taxRate ? `${l.taxRate}%` : "—"}
-                    </TableCell>
-                    <TableCell numeric className="font-medium">
-                      <Money value={l.total} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="border-t border-border/70 px-6 py-4">
-              <dl className="ml-auto grid max-w-xs gap-1.5 text-sm">
+                    </div>
+                    <Money value={l.total} className="figure text-[15px] font-semibold" />
+                  </li>
+                );
+              })}
+            </ul>
+
+            <div className="border-t border-border/60 bg-muted/35 px-6 py-5">
+              <dl className="ml-auto grid max-w-sm gap-2 text-sm">
                 <TotalRow label="Subtotal" value={inv.subtotal + inv.itemDiscount} />
                 {inv.discountTotal > 0 && <TotalRow label="Discounts" value={-inv.discountTotal} />}
                 <TotalRow label={`Tax${inv.taxInclusive ? " (included)" : ""}`} value={inv.taxTotal} muted={inv.taxInclusive} />
                 {inv.shipping > 0 && <TotalRow label="Charges" value={inv.shipping} />}
                 {inv.roundOff !== 0 && <TotalRow label="Rounding" value={inv.roundOff} muted />}
-                <div className="rule-double-top mt-1 flex justify-between pt-2 font-display text-lg font-semibold">
-                  <dt>Total</dt>
-                  <dd className="figure">{money.format(inv.total)}</dd>
+                <div className="rule-double-top mt-2 flex items-baseline justify-between pt-3">
+                  <dt className="font-display text-base font-semibold">Total</dt>
+                  <dd className="figure text-lg">{money.format(inv.total)}</dd>
                 </div>
                 {inv.amountReturned > 0 && <TotalRow label="Returned" value={-inv.amountReturned} />}
                 <TotalRow label="Paid" value={inv.amountPaid} />
@@ -238,61 +264,82 @@ function InvoiceView() {
                 )}
               </dl>
             </div>
-          </SectionCard>
+          </Panel>
 
-          <SectionCard title="Payments" flush>
+          <Panel title="Payments" aside={<span className="label-caps text-muted-foreground">{inv.payments?.length ?? 0} recorded</span>}>
             {(inv.payments ?? []).length === 0 ? (
-              <p className="px-6 py-5 text-[13px] text-muted-foreground">No payments recorded.</p>
+              <p className="px-6 py-6 text-[13px] text-muted-foreground">No payments recorded yet.</p>
             ) : (
-              <Table>
-                <TableBody>
-                  {inv.payments!.map((p) => {
-                    const alloc = p.allocations.find((a) => a.docId === inv.id)?.amount ?? p.amount;
-                    return (
-                      <TableRow key={p.id} className="hover:bg-transparent">
-                        <TableCell>
+              <ol className="px-6 py-5">
+                {inv.payments!.map((p, i, all) => {
+                  const alloc = p.allocations.find((a) => a.docId === inv.id)?.amount ?? p.amount;
+                  const voided = p.status === "void";
+                  return (
+                    <li key={p.id} className="relative flex gap-4 pb-6 last:pb-0">
+                      {i < all.length - 1 && <span aria-hidden className="absolute left-[7px] top-5 bottom-0 w-px bg-border" />}
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "relative mt-1.5 size-[15px] shrink-0 rounded-full ring-4 ring-card",
+                          voided ? "bg-border-strong" : "bg-highlight",
+                        )}
+                      />
+                      <div className="flex min-w-0 flex-1 flex-wrap items-start justify-between gap-x-6 gap-y-1">
+                        <div className="min-w-0">
                           <p className="font-medium">
                             {p.methodName ?? TENDER_LABELS[p.tender]}
-                            {p.status === "void" && (
+                            {voided && (
                               <Badge variant="neutral" className="ml-2">
                                 Void
                               </Badge>
                             )}
                           </p>
-                          <p className="font-mono text-[11.5px] text-muted-foreground">
+                          <p className="mt-0.5 font-mono text-[11.5px] text-muted-foreground">
                             {[p.number, p.reference, p.giftCardCode].filter(Boolean).join(" · ")}
                           </p>
-                        </TableCell>
-                        <TableCell className="hidden text-muted-foreground sm:table-cell">{formatDateTime(p.createdAt)}</TableCell>
-                        <TableCell numeric className="font-medium">
-                          <Money value={p.direction === "in" ? alloc : -alloc} className={p.status === "void" ? "line-through" : undefined} />
-                          {p.change ? <p className="text-[11px] text-muted-foreground">change {money.format(p.change)}</p> : null}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                          <p className="mt-0.5 text-[12.5px] text-muted-foreground">{formatDateTime(p.createdAt)}</p>
+                        </div>
+                        <div className="text-right">
+                          <Money
+                            value={p.direction === "in" ? alloc : -alloc}
+                            className={cn("figure text-[15px] font-semibold", voided && "line-through text-muted-foreground")}
+                          />
+                          {p.change ? <p className="num text-[11.5px] text-muted-foreground">change {money.format(p.change)}</p> : null}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
             )}
-          </SectionCard>
+          </Panel>
         </div>
 
         <div className="grid content-start gap-6">
-          <SectionCard title="Customer">
+          <Panel title="Customer">
             {inv.customerId ? (
-              <Link href={`/customers/view?id=${inv.customerId}`} className="flex items-center gap-3 rounded-xl p-1 transition-colors hover:bg-muted/50">
+              <Link
+                href={`/customers/view?id=${inv.customerId}`}
+                className="group flex items-center gap-4 rounded-2xl p-2 -m-2 transition-colors hover:bg-muted/60"
+              >
                 <Avatar name={inv.customerName} />
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{inv.customerName}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-display font-semibold">{inv.customerName}</p>
                   <p className="truncate text-[13px] text-muted-foreground">{inv.customerPhone ?? "View account"}</p>
                 </div>
+                <span className="text-muted-foreground transition-transform group-hover:translate-x-0.5">→</span>
               </Link>
             ) : (
-              <p className="text-sm text-muted-foreground">Walk-in customer</p>
+              <div className="flex items-center gap-4">
+                <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <HandCoins className="size-[17px]" strokeWidth={1.8} />
+                </span>
+                <p className="text-sm text-muted-foreground">Walk-in customer</p>
+              </div>
             )}
-          </SectionCard>
+          </Panel>
 
-          <SectionCard title="Details">
+          <Panel title="Details">
             <KeyValue
               items={[
                 { label: "Date", value: formatDate(inv.date) },
@@ -310,33 +357,17 @@ function InvoiceView() {
                       : null,
                   hideEmpty: true,
                 },
-                ...(can("reports.view")
-                  ? [
-                      {
-                        label: "Gross profit",
-                        value: isVoid ? null : (
-                          <span>
-                            <Money value={inv.netTotal - inv.costTotal} />{" "}
-                            <span className="text-muted-foreground">
-                              ({inv.netTotal ? Math.round(((inv.netTotal - inv.costTotal) / inv.netTotal) * 100) : 0}%)
-                            </span>
-                          </span>
-                        ),
-                        hideEmpty: true,
-                      },
-                    ]
-                  : []),
                 { label: "Note", value: inv.note ? <span className="whitespace-pre-line">{inv.note}</span> : null, hideEmpty: true },
               ]}
             />
-          </SectionCard>
+          </Panel>
 
           {(inv.returns?.length ?? 0) > 0 && (
-            <SectionCard title="Returns" flush>
-              <ul className="divide-y divide-border/70">
+            <Panel title="Returns" flush>
+              <ul className="divide-y divide-border/60">
                 {inv.returns!.map((r) => (
                   <li key={r.id}>
-                    <Link href={`/sales/returns/view?id=${r.id}`} className="flex items-center justify-between px-6 py-3 text-sm hover:bg-muted/40">
+                    <Link href={`/sales/returns/view?id=${r.id}`} className="flex items-center justify-between px-6 py-3.5 text-sm transition-colors hover:bg-muted/50">
                       <span>
                         <span className="font-mono text-[12.5px] font-medium">{r.number}</span>
                         <span className="ml-2 text-muted-foreground">{formatDate(r.date)}</span>
@@ -346,7 +377,7 @@ function InvoiceView() {
                   </li>
                 ))}
               </ul>
-            </SectionCard>
+            </Panel>
           )}
           {inv.exchangeReturnId && (
             <Button variant="outline" asChild>
@@ -363,11 +394,46 @@ function InvoiceView() {
   );
 }
 
+/** Soft, borderless panel used for every section on this page. */
+function Panel({
+  title,
+  aside,
+  flush,
+  className,
+  children,
+}: {
+  title: string;
+  aside?: React.ReactNode;
+  flush?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={cn("overflow-hidden rounded-2xl bg-card shadow-card", className)}>
+      <header className={cn("flex items-center justify-between gap-4 px-6 pt-5", flush ? "pb-4" : "pb-3")}>
+        <h2 className="font-display text-lg font-semibold tracking-tight">{title}</h2>
+        {aside}
+      </header>
+      {flush ? children : <div className="px-6 pb-6">{children}</div>}
+    </section>
+  );
+}
+
+function HeroStat({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <div className="bg-black/25 px-5 py-4 backdrop-blur-sm">
+      <dt className="label-caps text-white/50">{label}</dt>
+      <dd className={cn("figure mt-2 text-xl", accent ? "text-highlight" : "text-white")}>{value}</dd>
+      {sub && <p className="num mt-0.5 text-[12px] text-white/50">{sub}</p>}
+    </div>
+  );
+}
+
 function TotalRow({ label, value, muted }: { label: string; value: number; muted?: boolean }) {
   return (
-    <div className={muted ? "flex justify-between text-muted-foreground" : "flex justify-between"}>
+    <div className={cn("flex justify-between", muted && "text-muted-foreground")}>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd>
+      <dd className="num">
         <Money value={value} />
       </dd>
     </div>

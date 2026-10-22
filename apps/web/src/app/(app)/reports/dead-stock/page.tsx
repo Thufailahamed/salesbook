@@ -3,8 +3,7 @@
 import * as React from "react";
 import { Boxes, PackageX, Wallet } from "lucide-react";
 import type { DeadStockReport } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
-import { SectionCard } from "@/components/section-card";
+import { ReportPage, ReportSection } from "@/components/report-shell";
 import { StatCard } from "@/components/stat-card";
 import { EmptyState } from "@/components/empty-state";
 import { Money } from "@/components/money";
@@ -43,7 +42,7 @@ export default function DeadStockPage() {
             <StatCard label="Items" value={r.rows.length} icon={PackageX} tone="warning" />
             <StatCard label="Units" value={formatQty(r.totalQuantity)} icon={Boxes} tone="info" />
           </div>
-          <SectionCard title="Items" flush>
+          <ReportSection title="Items" flush>
             {r.rows.length === 0 ? (
               <EmptyState compact title="Nothing is standing still" description={`Every item in stock has sold in the last ${r.days} days.`} />
             ) : (
@@ -82,7 +81,7 @@ export default function DeadStockPage() {
                 </TableFooter>
               </Table>
             )}
-          </SectionCard>
+          </ReportSection>
         </div>
       )}
     </ReportPage>

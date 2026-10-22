@@ -5,17 +5,23 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  ArrowRight,
   CirclePlus,
+  FileUp,
   Minus,
+  PackagePlus,
   PauseCircle,
+  Pencil,
   Percent,
   Plus,
   RotateCcw,
+  ScanBarcode,
   ShoppingCart,
   SlidersHorizontal,
   Trash2,
   Undo2,
   Vault,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -68,7 +74,6 @@ import {
 } from "@/components/pos/dialogs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -224,6 +229,15 @@ function PointOfSale() {
     setLines((ls) => addItem(ls, item, tier));
   };
 
+  /** A scan that matches nothing: offer to create the product with that barcode filled in. */
+  const notFound = (code: string) => {
+    if (!can("products.manage")) return toast.error(`No product found for “${code}”`);
+    toast(`No product found for “${code}”`, {
+      action: { label: "Add product", onClick: () => router.push(`/products/new?barcode=${encodeURIComponent(code)}`) },
+      duration: 8000,
+    });
+  };
+
   const reset = React.useCallback(() => {
     setCart({ ...emptyCart() });
     setRet(null);
@@ -350,11 +364,14 @@ function PointOfSale() {
     : st.remainingSale > 0
       ? "Charge"
       : "Complete";
+  const activeCategory = categoryId ? (categories.data ?? []).find((c) => c.id === categoryId) : null;
+  const shelf = grid.data ?? [];
+  const lowStock = shelf.filter((i) => i.trackInventory && i.stock > 0 && i.stock <= LOW_STOCK).length;
 
   return (
     <>
-      {/* ------------------------------------------------ top bar */}
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-3 sm:px-4">
+      {/* ------------------------------------------------ top bar, on the obsidian frame */}
+      <header className="dark flex h-14 shrink-0 items-center gap-2 bg-frame px-2 text-foreground sm:px-3">
         <Hint label="Back to the office">
           <Button variant="ghost" size="icon-sm" asChild>
             <Link href={can("dashboard.view") ? "/dashboard" : "/sales"} aria-label="Back">
@@ -363,25 +380,30 @@ function PointOfSale() {
           </Button>
         </Hint>
         <Brand className="hidden sm:flex" />
-        <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
+        <div className="mx-1.5 hidden h-5 w-px bg-border-strong sm:block" />
         <LocationSwitcher />
         {can("registers.use") && (
           <button
             type="button"
             onClick={() => (openShift ? router.push(`/registers/view?id=${openShift.id}`) : setShiftOpen(true))}
-            className="hidden items-center gap-2 rounded-full border border-border px-3 py-1 text-[12.5px] transition-colors hover:bg-muted md:flex"
+            className="hidden items-center gap-2 rounded-full bg-card px-3 py-1 text-[12.5px] ring-1 ring-border transition-colors hover:bg-accent md:flex"
           >
-            <span className={cn("size-2 rounded-full", openShift ? "bg-success" : "bg-muted-foreground/40")} />
+            <span className="relative flex size-2">
+              {openShift && <span className="motion-anim absolute inset-0 animate-ping rounded-full bg-success/60" />}
+              <span className={cn("relative size-2 rounded-full", openShift ? "bg-success" : "bg-muted-foreground/50")} />
+            </span>
             {openShift ? (
               <>
-                {openShift.number} <span className="text-muted-foreground">since {formatTime(openShift.openedAt)}</span>
+                <span className="font-mono text-[12px]">{openShift.number}</span>
+                <span className="text-muted-foreground">since {formatTime(openShift.openedAt)}</span>
               </>
             ) : (
-              <span className="text-muted-foreground">No open shift</span>
+              <span className="text-muted-foreground">No open shift · open one</span>
             )}
           </button>
         )}
         <div className="flex-1" />
+        <LiveClock />
         {can("sales.return") && (
           <Button variant={ret ? "soft" : "ghost"} size="sm" onClick={() => setReturnOpen(true)}>
             <Undo2 /> <span className="hidden sm:inline">Return</span>
@@ -391,22 +413,47 @@ function PointOfSale() {
         <Button variant="ghost" size="sm" onClick={() => setHeldOpen(true)}>
           <PauseCircle /> <span className="hidden sm:inline">Held</span>
           {(held.data?.length ?? 0) > 0 && (
-            <Badge variant="solid" className="ml-0.5 px-1.5">
+            <span className="ml-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-highlight px-1 text-[10.5px] font-semibold text-highlight-foreground">
               {held.data!.length}
-            </Badge>
+            </span>
           )}
         </Button>
         <ThemeToggle />
         <UserMenu />
       </header>
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_420px] xl:grid-cols-[minmax(0,1fr)_460px]">
-        {/* ------------------------------------------------ products */}
-        <section className={cn("min-h-0 flex-col", mobileView === "products" ? "flex" : "hidden lg:flex")}>
-          <div className="space-y-3 border-b border-border/70 px-4 pt-4 pb-3">
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_420px] xl:grid-cols-[minmax(0,1fr)_452px]">
+        {/* ------------------------------------------------ products: the stone panel */}
+        <section
+          className={cn(
+            "min-h-0 flex-col overflow-hidden bg-background lg:mb-2 lg:ml-2 lg:rounded-[20px] lg:shadow-[0_0_0_1px_var(--border)]",
+            mobileView === "products" ? "flex" : "hidden lg:flex",
+          )}
+        >
+          <div className="px-4 pt-4 pb-3 sm:px-6 sm:pt-6">
+            <div className="mb-4 hidden items-end justify-between gap-4 sm:flex">
+              <div className="min-w-0">
+                <p className="eyebrow">Counter · {location?.name ?? "Store"}</p>
+                <h1 className="mt-1.5 truncate text-[28px] leading-none tracking-[-0.045em] [font-stretch:120%]">
+                  {activeCategory?.name ?? "All items"}
+                </h1>
+              </div>
+              {!grid.isLoading && shelf.length > 0 && (
+                <p className="shrink-0 pb-0.5 text-[12.5px] text-muted-foreground">
+                  <span className="num font-medium text-foreground">{shelf.length}</span> on the shelf
+                  {lowStock > 0 && (
+                    <>
+                      {" · "}
+                      <span className="num font-medium text-warning-soft-foreground">{lowStock}</span> running low
+                    </>
+                  )}
+                </p>
+              )}
+            </div>
             <VariantPicker
               ref={searchRef}
               onSelect={add}
+              onNotFound={notFound}
               locationId={locationId}
               priceTier={tier}
               size="lg"
@@ -414,52 +461,51 @@ function PointOfSale() {
               placeholder="Search products, scan a barcode…   (F2)"
               disabled={!can("pos.sell")}
             />
-            <div className="scrollbar-none -mx-4 flex gap-1.5 overflow-x-auto px-4">
-              <CategoryChip on={!categoryId} onClick={() => setCategoryId(null)}>
-                All items
-              </CategoryChip>
-              {(categories.data ?? [])
-                .filter((c) => c.productCount > 0)
-                .map((c) => (
-                  <CategoryChip key={c.id} on={categoryId === c.id} onClick={() => setCategoryId(c.id)} color={c.color}>
-                    {c.name}
-                  </CategoryChip>
-                ))}
-            </div>
+            {(categories.data ?? []).some((c) => c.productCount > 0) && (
+              <div className="scrollbar-none -mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 sm:-mx-6 sm:px-6">
+                <CategoryChip on={!categoryId} onClick={() => setCategoryId(null)}>
+                  All items
+                </CategoryChip>
+                {(categories.data ?? [])
+                  .filter((c) => c.productCount > 0)
+                  .map((c) => (
+                    <CategoryChip key={c.id} on={categoryId === c.id} onClick={() => setCategoryId(c.id)} color={c.color} count={c.productCount}>
+                      {c.name}
+                    </CategoryChip>
+                  ))}
+              </div>
+            )}
           </div>
-          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 pt-1 pb-4 sm:px-6 sm:pb-6">
             {grid.isLoading ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                 {Array.from({ length: 12 }).map((_, i) => (
-                  <Skeleton key={i} className="h-40 rounded-xl" />
+                  <Skeleton key={i} className="h-52 rounded-[18px]" />
                 ))}
               </div>
-            ) : grid.data && grid.data.length > 0 ? (
+            ) : shelf.length > 0 ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                {grid.data.map((i) => (
-                  <ProductTile key={i.variantId} item={i} tier={tier} onClick={() => add(i)} inCart={cart.lines.filter((l) => l.variantId === i.variantId).reduce((s, l) => s + l.quantity, 0)} />
+                {shelf.map((i) => (
+                  <ProductTile
+                    key={i.variantId}
+                    item={i}
+                    tier={tier}
+                    onClick={() => add(i)}
+                    inCart={cart.lines.filter((l) => l.variantId === i.variantId).reduce((s, l) => s + l.quantity, 0)}
+                  />
                 ))}
               </div>
+            ) : categoryId ? (
+              <EmptyState icon={ShoppingCart} title="Nothing here yet" description="No products in this category." />
             ) : (
-              <EmptyState
-                icon={ShoppingCart}
-                title="No products to show"
-                description={categoryId ? "Nothing in this category yet." : "Add products to your catalog to start selling."}
-                action={
-                  can("products.manage") ? (
-                    <Button size="sm" asChild>
-                      <Link href="/products/new">Add a product</Link>
-                    </Button>
-                  ) : undefined
-                }
-              />
+              <EmptyCatalog canManage={can("products.manage")} canSell={can("pos.sell")} onCustom={() => setCustomOpen(true)} />
             )}
           </div>
         </section>
 
-        {/* ------------------------------------------------ cart */}
-        <aside className={cn("min-h-0 flex-col border-l border-border bg-card", mobileView === "cart" ? "flex" : "hidden lg:flex")}>
-          <div className="flex items-center gap-2 border-b border-border/70 p-3">
+        {/* ------------------------------------------------ cart: the ticket, on the frame */}
+        <aside className={cn("dark min-h-0 flex-col bg-frame text-foreground", mobileView === "cart" ? "flex" : "hidden lg:flex")}>
+          <div className="flex items-center gap-2 px-3 pt-2 pb-2.5 lg:pt-0">
             <CustomerPicker
               value={cart.customerId}
               onChange={(id) => update({ customerId: id })}
@@ -476,168 +522,189 @@ function PointOfSale() {
               today={today}
             />
           </div>
-          {cust && (cust.dueBalance > 0 || cust.creditBalance > 0 || cust.loyaltyPoints > 0 || cust.priceTier === "wholesale") && (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 border-b border-border/70 bg-muted/30 px-4 py-2 text-[12px]">
-              {cust.priceTier === "wholesale" && <span className="font-medium text-info">Wholesale prices</span>}
-              {cust.dueBalance > 0 && (
-                <span className="text-muted-foreground">
-                  Owes <Money value={cust.dueBalance} className="font-medium text-destructive" />
-                </span>
-              )}
-              {cust.creditBalance > 0 && (
-                <span className="text-muted-foreground">
-                  Credit <Money value={cust.creditBalance} className="font-medium text-success-soft-foreground" />
-                </span>
-              )}
-              {business.loyaltyEnabled && cust.loyaltyPoints > 0 && <span className="text-muted-foreground">{formatQty(cust.loyaltyPoints)} pts</span>}
-            </div>
-          )}
 
-          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-            {ret && (
-              <button
-                type="button"
-                onClick={() => setReturnOpen(true)}
-                className="flex w-full items-center gap-3 border-b border-dashed border-border bg-warning-soft/40 px-4 py-3 text-left"
-              >
-                <RotateCcw className="size-4 shrink-0 text-warning" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">
-                    Returning {formatQty(credit.count)} item{credit.count === 1 ? "" : "s"}
+          <div className="mx-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-card shadow-[0_24px_60px_-30px_rgb(0_0_0/0.9)] ring-1 ring-border">
+            {/* ticket header */}
+            <div className="flex items-center justify-between gap-3 border-b border-dashed border-border-strong px-4 py-3">
+              <div className="min-w-0">
+                <p className="eyebrow">{ret && !hasSale ? "Return" : ret ? "Exchange" : cart.quotationId ? "From quotation" : heldSaleId ? "Resumed sale" : "Current sale"}</p>
+                <p className="mt-0.5 truncate text-[13px] text-muted-foreground">
+                  {cust ? cust.name : "Walk-in customer"}
+                  {saleDate !== today && <> · {saleDate}</>}
+                </p>
+              </div>
+              <span className="num shrink-0 rounded-full bg-muted px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground">
+                {formatQty(itemCount)} item{itemCount === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            {cust && (cust.dueBalance > 0 || cust.creditBalance > 0 || cust.loyaltyPoints > 0 || cust.priceTier === "wholesale") && (
+              <div className="flex flex-wrap gap-1.5 border-b border-border px-4 py-2.5 text-[11.5px]">
+                {cust.priceTier === "wholesale" && <Chip className="text-info-soft-foreground">Wholesale prices</Chip>}
+                {cust.dueBalance > 0 && (
+                  <Chip>
+                    Owes <Money value={cust.dueBalance} className="font-semibold text-destructive-soft-foreground" />
+                  </Chip>
+                )}
+                {cust.creditBalance > 0 && (
+                  <Chip>
+                    Credit <Money value={cust.creditBalance} className="font-semibold text-success-soft-foreground" />
+                  </Chip>
+                )}
+                {business.loyaltyEnabled && cust.loyaltyPoints > 0 && <Chip>{formatQty(cust.loyaltyPoints)} pts</Chip>}
+              </div>
+            )}
+
+            <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+              {ret && (
+                <button
+                  type="button"
+                  onClick={() => setReturnOpen(true)}
+                  className="flex w-full items-center gap-3 border-b border-dashed border-border-strong bg-warning-soft/50 px-4 py-3 text-left"
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-warning/15 text-warning">
+                    <RotateCcw className="size-4" />
                   </span>
-                  <span className="block font-mono text-[11.5px] text-muted-foreground">from {ret.invoice.number}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium">
+                      Returning {formatQty(credit.count)} item{credit.count === 1 ? "" : "s"}
+                    </span>
+                    <span className="block font-mono text-[11.5px] text-muted-foreground">from {ret.invoice.number}</span>
+                  </span>
+                  <Money value={-credit.total} tone="signed" className="font-semibold" />
+                </button>
+              )}
+              {!hasSale ? (
+                !ret && <EmptyTicket />
+              ) : (
+                <ul className="divide-y divide-border">
+                  {cart.lines.map((l, i) => {
+                    const calc = totals.lines[i];
+                    const lineTotal = calc ? calc.gross - calc.lineDiscount : 0;
+                    const short = shortLines.includes(l);
+                    return (
+                      <li key={l.key} className="group px-4 py-3.5 transition-colors hover:bg-accent/40">
+                        <div className="flex gap-3">
+                          <Thumb name={l.name} imageUrl={l.imageUrl} className="size-11 rounded-xl" />
+                          <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setEditing(l)}>
+                            <p className="truncate text-[13.5px] leading-tight font-medium">{l.name}</p>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                              {l.variantName && <>{l.variantName} · </>}
+                              <span className="num">{money.format(l.unitPrice)}</span>
+                              {l.unitPrice !== l.listPrice && l.variantId && <span className="ml-1 text-warning">(was {money.format(l.listPrice)})</span>}
+                              {l.discountType && (
+                                <span className="ml-1 text-success-soft-foreground">
+                                  −{l.discountType === "percent" ? `${l.discountValue}%` : money.format(l.discountValue)}
+                                </span>
+                              )}
+                            </p>
+                            {l.note && <p className="truncate text-xs text-muted-foreground italic">{l.note}</p>}
+                            {short && <p className="text-xs font-medium text-destructive-soft-foreground">Only {formatQty(l.stock)} in stock</p>}
+                          </button>
+                          <Money value={lineTotal} className="num pt-0.5 text-[14px] font-semibold" />
+                        </div>
+                        <div className="mt-2.5 flex items-center gap-1 pl-14">
+                          <QtyStep
+                            value={l.quantity}
+                            unit={l.unitShortName}
+                            onChange={(q) =>
+                              q <= 0
+                                ? setLines((ls) => ls.filter((x) => x.key !== l.key))
+                                : setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, quantity: q } : x)))
+                            }
+                            step={1}
+                          />
+                          <div className="flex-1" />
+                          <Button variant="ghost" size="icon-xs" className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100" onClick={() => setEditing(l)} aria-label={`Edit ${l.name}`}>
+                            <Pencil />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="opacity-50 group-hover:opacity-100 hover:text-destructive-soft-foreground"
+                            onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                            aria-label={`Remove ${l.name}`}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
+            {/* totals: the foot of the ticket */}
+            <div className="border-t border-dashed border-border-strong bg-muted/40 px-4 pt-3 pb-4">
+              <dl className="grid gap-1.5 text-[13px]">
+                <Row label={`Subtotal · ${formatQty(itemCount)} item${itemCount === 1 ? "" : "s"}`} value={totals.subtotal} />
+                {totals.docDiscount > 0 && (
+                  <Row label={`Discount${cart.docDiscountType === "percent" ? ` (${cart.docDiscountValue}%)` : ""}`} value={-totals.docDiscount} />
+                )}
+                {totals.taxTotal > 0 && <Row label={business.taxInclusive ? "Tax (included)" : "Tax"} value={totals.taxTotal} muted={business.taxInclusive} />}
+                {totals.shipping > 0 && <Row label="Charges" value={totals.shipping} />}
+                {totals.roundOff !== 0 && <Row label="Rounding" value={totals.roundOff} muted />}
+                {ret && hasSale && <Row label="Total" value={totals.total} />}
+                {ret && st.appliedToExchange > 0 && <Row label="Exchange credit" value={-st.appliedToExchange} />}
+                {ret && st.appliedToOriginal > 0 && <Row label={`Reduces ${ret.invoice.number} balance`} value={st.appliedToOriginal} muted />}
+              </dl>
+              <div className="mt-3 flex items-end justify-between border-t-[3px] border-double border-border-strong pt-3">
+                <span className="text-[12px] font-semibold tracking-[0.14em] text-muted-foreground uppercase [font-stretch:115%]">
+                  {hasSale ? (st.remainingSale > 0 ? "To pay" : "Total") : st.refundDue > 0 ? "Refund" : "Total"}
                 </span>
-                <Money value={-credit.total} tone="signed" className="font-semibold" />
-              </button>
-            )}
-            {!hasSale ? (
-              !ret && (
-                <EmptyState
-                  compact
-                  icon={ShoppingCart}
-                  title="Cart is empty"
-                  description="Tap a product, scan a barcode or search to start a sale."
-                  className="py-16"
-                />
-              )
-            ) : (
-              <ul className="divide-y divide-border/60">
-                {cart.lines.map((l, i) => {
-                  const calc = totals.lines[i];
-                  const lineTotal = calc ? calc.gross - calc.lineDiscount : 0;
-                  const short = shortLines.includes(l);
-                  return (
-                    <li key={l.key} className="group px-4 py-3">
-                      <div className="flex items-start gap-3">
-                        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setEditing(l)}>
-                          <p className="truncate text-sm font-medium">{l.name}</p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {l.variantName && <>{l.variantName} · </>}
-                            <span className="num">{money.format(l.unitPrice)}</span>
-                            {l.unitPrice !== l.listPrice && l.variantId && <span className="ml-1 text-warning">(was {money.format(l.listPrice)})</span>}
-                            {l.discountType && (
-                              <span className="ml-1 text-success-soft-foreground">
-                                −{l.discountType === "percent" ? `${l.discountValue}%` : money.format(l.discountValue)}
-                              </span>
-                            )}
-                          </p>
-                          {l.note && <p className="truncate text-xs text-muted-foreground italic">{l.note}</p>}
-                          {short && <p className="text-xs font-medium text-destructive">Only {formatQty(l.stock)} in stock</p>}
-                        </button>
-                        <Money value={lineTotal} className="pt-0.5 text-sm font-semibold" />
-                      </div>
-                      <div className="mt-2 flex items-center gap-1.5">
-                        <QtyStep
-                          value={l.quantity}
-                          unit={l.unitShortName}
-                          onChange={(q) => (q <= 0 ? setLines((ls) => ls.filter((x) => x.key !== l.key)) : setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, quantity: q } : x))))}
-                          step={1}
-                        />
-                        <div className="flex-1" />
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="opacity-60 group-hover:opacity-100"
-                          onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
-                          aria-label={`Remove ${l.name}`}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                <span className="figure text-gold text-[32px] leading-none">{money.format(hasSale ? st.remainingSale : st.refundDue)}</span>
+              </div>
+            </div>
           </div>
 
-          {/* totals */}
-          <div className="border-t border-border bg-card">
-            <div className="flex items-center gap-1 border-b border-border/70 px-2 py-1.5">
-              <Button variant="ghost" size="sm" onClick={() => setCustomOpen(true)} disabled={!can("pos.sell")}>
-                <CirclePlus /> Custom
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setOptionsOpen(true)} disabled={!hasSale}>
-                <Percent /> Discount
-              </Button>
-              <Button variant="ghost" size="sm" onClick={holdCart} disabled={!hasSale || hold.isPending}>
-                <PauseCircle /> Hold
-              </Button>
-              <div className="flex-1" />
-              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={clear} disabled={empty}>
-                Clear
-              </Button>
+          {/* actions + charge */}
+          <div className="px-3 pt-2.5 pb-3">
+            <div className="grid grid-cols-4 gap-1.5">
+              <ActionTile icon={CirclePlus} label="Custom" onClick={() => setCustomOpen(true)} disabled={!can("pos.sell")} />
+              <ActionTile icon={Percent} label="Discount" kbd="F8" onClick={() => setOptionsOpen(true)} disabled={!hasSale} />
+              <ActionTile icon={PauseCircle} label="Hold" kbd="F4" onClick={holdCart} disabled={!hasSale || hold.isPending} />
+              <ActionTile icon={Trash2} label="Clear" onClick={clear} disabled={empty} />
             </div>
-            <dl className="grid gap-1 px-4 pt-3 text-[13px]">
-              <Row label={`Subtotal · ${formatQty(itemCount)} item${itemCount === 1 ? "" : "s"}`} value={totals.subtotal} />
-              {totals.docDiscount > 0 && (
-                <Row label={`Discount${cart.docDiscountType === "percent" ? ` (${cart.docDiscountValue}%)` : ""}`} value={-totals.docDiscount} />
-              )}
-              {totals.taxTotal > 0 && <Row label={business.taxInclusive ? "Tax (included)" : "Tax"} value={totals.taxTotal} muted={business.taxInclusive} />}
-              {totals.shipping > 0 && <Row label="Charges" value={totals.shipping} />}
-              {totals.roundOff !== 0 && <Row label="Rounding" value={totals.roundOff} muted />}
-              {ret && hasSale && <Row label="Total" value={totals.total} />}
-              {ret && st.appliedToExchange > 0 && <Row label="Exchange credit" value={-st.appliedToExchange} />}
-              {ret && st.appliedToOriginal > 0 && <Row label={`Reduces ${ret.invoice.number} balance`} value={st.appliedToOriginal} muted />}
-            </dl>
             {needsShift && (
               <button
                 type="button"
                 onClick={() => setShiftOpen(true)}
-                className="mx-4 mt-3 flex w-[calc(100%-2rem)] items-center gap-2 rounded-lg bg-warning-soft px-3 py-2 text-left text-[12.5px] text-warning-soft-foreground"
+                className="mt-2.5 flex w-full items-center gap-2 rounded-xl bg-warning-soft px-3 py-2.5 text-left text-[12.5px] text-warning-soft-foreground ring-1 ring-warning/20"
               >
                 <Vault className="size-4" /> Open a register shift to take payments
               </button>
             )}
-            <div className="p-4">
-              <Button
-                size="xl"
-                variant="brand"
-                className="w-full justify-between"
-                onClick={charge}
-                disabled={empty || shortLines.length > 0}
-              >
-                <span className="flex items-center gap-2">
-                  {chargeLabel}
-                  <Kbd className="hidden border-white/20 bg-white/10 text-current lg:inline-flex">F9</Kbd>
-                </span>
-                <span className="figure text-2xl">{money.format(hasSale ? st.remainingSale : st.refundDue)}</span>
-              </Button>
-            </div>
+            <Button
+              size="xl"
+              variant="highlight"
+              className="mt-2.5 h-16 w-full justify-between rounded-[18px] px-6"
+              onClick={charge}
+              disabled={empty || shortLines.length > 0}
+            >
+              <span className="flex items-center gap-2.5 text-[17px]">
+                {chargeLabel}
+                <Kbd className="hidden border-black/10 bg-black/10 text-current lg:inline-flex">F9</Kbd>
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="figure text-[24px]">{money.format(hasSale ? st.remainingSale : st.refundDue)}</span>
+                <ArrowRight className="size-5" />
+              </span>
+            </Button>
           </div>
         </aside>
       </div>
 
       {/* mobile switcher */}
-      <div className="flex border-t border-border bg-card p-2 lg:hidden">
-        <Button
-          variant={mobileView === "products" ? "secondary" : "ghost"}
-          className="flex-1"
-          onClick={() => setMobileView("products")}
-        >
+      <div className="dark flex gap-1.5 bg-frame p-2 text-foreground lg:hidden">
+        <Button variant={mobileView === "products" ? "secondary" : "ghost"} className="flex-1" onClick={() => setMobileView("products")}>
           Products
         </Button>
-        <Button variant={mobileView === "cart" ? "secondary" : "ghost"} className="flex-1" onClick={() => setMobileView("cart")}>
+        <Button
+          variant={mobileView === "cart" ? "secondary" : itemCount > 0 ? "highlight" : "ghost"}
+          className="flex-1"
+          onClick={() => setMobileView("cart")}
+        >
           Cart · {formatQty(itemCount)} · <Money value={totals.total} />
         </Button>
       </div>
@@ -712,6 +779,9 @@ function PointOfSale() {
 
 // ---------------------------------------------------------------- pieces
 
+/** Items at or below this count show as running low. */
+const LOW_STOCK = 5;
+
 function Row({ label, value, muted }: { label: React.ReactNode; value: number; muted?: boolean }) {
   return (
     <div className={cn("flex justify-between", muted && "text-muted-foreground")}>
@@ -723,18 +793,64 @@ function Row({ label, value, muted }: { label: React.ReactNode; value: number; m
   );
 }
 
-function CategoryChip({ on, onClick, children, color }: { on: boolean; onClick: () => void; children: React.ReactNode; color?: string | null }) {
+function Chip({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <span className={cn("inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-muted-foreground", className)}>{children}</span>;
+}
+
+function LiveClock() {
+  const [now, setNow] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(id);
+  }, []);
+  if (now == null) return null;
+  return <span className="num mr-1 hidden font-mono text-[12.5px] text-muted-foreground xl:block">{formatTime(now)}</span>;
+}
+
+function initials(name: string) {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return (words.length > 1 ? words[0]![0]! + words[1]![0]! : name.slice(0, 2)).toUpperCase();
+}
+
+function Thumb({ name, imageUrl, className }: { name: string; imageUrl: string | null; className?: string }) {
+  return (
+    <span className={cn("relative flex shrink-0 items-center justify-center overflow-hidden bg-muted ring-1 ring-border", className)}>
+      {imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={assetUrl(imageUrl)!} alt="" className="size-full object-cover" />
+      ) : (
+        <span className="text-[11px] font-semibold tracking-[0.02em] text-muted-foreground [font-stretch:125%]">{initials(name)}</span>
+      )}
+    </span>
+  );
+}
+
+function CategoryChip({
+  on,
+  onClick,
+  children,
+  color,
+  count,
+}: {
+  on: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  color?: string | null;
+  count?: number;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors",
-        on ? "border-ink bg-ink text-ink-foreground" : "border-border bg-card text-foreground/80 hover:bg-muted",
+        "flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-medium whitespace-nowrap ring-1 transition-all",
+        on ? "bg-ink text-ink-foreground ring-ink" : "bg-card text-foreground/75 ring-border hover:text-foreground hover:ring-border-strong",
       )}
     >
       {color && <span className="size-2 rounded-full" style={{ background: color }} />}
       {children}
+      {count != null && <span className={cn("num text-[11px]", on ? "text-ink-foreground/60" : "text-muted-foreground")}>{count}</span>}
     </button>
   );
 }
@@ -744,22 +860,24 @@ function ProductTile({ item, tier, onClick, inCart }: { item: SellableItem; tier
   const base = tierPrice(item.price, item.wholesalePrice, tier);
   const price = unitPriceFor(item, tier);
   const out = item.trackInventory && item.stock <= 0;
+  const low = item.trackInventory && !out && item.stock <= LOW_STOCK;
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-xl bg-card text-left shadow-card transition-all hover:-translate-y-0.5 hover:shadow-raised active:translate-y-0 dark:shadow-[inset_0_0_0_1px_var(--border)]",
-        out && "opacity-55",
+        "group relative flex flex-col rounded-[18px] bg-card p-1.5 text-left ring-1 ring-border transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-raised)] hover:ring-border-strong active:translate-y-0 active:scale-[0.985]",
+        inCart > 0 && "ring-2 ring-primary hover:ring-primary",
+        out && "opacity-50",
       )}
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+      <div className="relative aspect-[4/3] w-full overflow-hidden rounded-[13px] bg-muted">
         {item.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={assetUrl(item.imageUrl)!} alt="" className="size-full object-cover transition-transform group-hover:scale-[1.03]" />
+          <img src={assetUrl(item.imageUrl)!} alt="" className="size-full object-cover transition-transform duration-500 group-hover:scale-[1.05]" />
         ) : (
-          <span className="flex size-full items-center justify-center font-display text-3xl text-muted-foreground/50">
-            {item.productName.slice(0, 1).toUpperCase()}
+          <span className="flex size-full items-center justify-center bg-[radial-gradient(120%_90%_at_30%_0%,var(--card),var(--muted))]">
+            <span className="text-[30px] font-semibold tracking-[-0.04em] text-foreground/20 [font-stretch:125%]">{initials(item.productName)}</span>
           </span>
         )}
         {item.promotion && (
@@ -767,22 +885,35 @@ function ProductTile({ item, tier, onClick, inCart }: { item: SellableItem; tier
             {promoLabel(item.promotion, (m) => money.format(m))}
           </span>
         )}
-        {inCart > 0 && (
-          <span className="absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-ink px-1.5 text-xs font-semibold text-ink-foreground shadow">
-            {formatQty(inCart)}
+        {inCart > 0 ? (
+          <span className="absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-[linear-gradient(180deg,oklch(0.92_0.06_90),oklch(0.8_0.1_80))] px-2 text-xs font-semibold text-[oklch(0.26_0.04_70)] shadow">
+            ×{formatQty(inCart)}
+          </span>
+        ) : null}
+        {!out && (
+          <span className="absolute right-2 bottom-2 flex size-8 translate-y-1 items-center justify-center rounded-full bg-ink text-ink-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+            <Plus className="size-4" />
           </span>
         )}
       </div>
-      <div className="flex flex-1 flex-col gap-0.5 p-2.5">
-        <p className="line-clamp-2 text-[13px] leading-snug font-medium">{item.productName}</p>
-        {item.variantName && <p className="truncate text-[11.5px] text-muted-foreground">{item.variantName}</p>}
-        <div className="mt-auto flex items-end justify-between gap-2 pt-1">
+      <div className="flex flex-1 flex-col px-2 pt-2.5 pb-1.5">
+        <p className="line-clamp-2 text-[13.5px] leading-snug font-medium">{item.productName}</p>
+        {item.variantName && <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{item.variantName}</p>}
+        <div className="mt-auto flex items-end justify-between gap-2 pt-2">
           <span className="flex items-baseline gap-1.5">
-            <span className="num text-sm font-semibold">{money.format(price)}</span>
+            <span className="figure text-[15.5px] leading-none">{money.format(price)}</span>
             {price !== base && <span className="num text-[11px] text-muted-foreground line-through">{money.format(base)}</span>}
           </span>
           {item.trackInventory && (
-            <span className={cn("num text-[11px]", out ? "text-destructive" : "text-muted-foreground")}>{out ? "Out" : formatQty(item.stock)}</span>
+            <span
+              className={cn(
+                "num flex items-center gap-1 text-[11px]",
+                out ? "text-destructive" : low ? "text-warning-soft-foreground" : "text-muted-foreground",
+              )}
+            >
+              <span className={cn("size-1.5 rounded-full", out ? "bg-destructive" : low ? "bg-warning" : "bg-success")} />
+              {out ? "Out" : formatQty(item.stock)}
+            </span>
           )}
         </div>
       </div>
@@ -790,12 +921,146 @@ function ProductTile({ item, tier, onClick, inCart }: { item: SellableItem; tier
   );
 }
 
+function ActionTile({
+  icon: Icon,
+  label,
+  kbd,
+  onClick,
+  disabled,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  kbd?: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="group flex flex-col items-center gap-1 rounded-xl bg-card px-1 py-2.5 text-[11.5px] font-medium text-foreground/80 ring-1 ring-border transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+    >
+      <Icon className="size-4" />
+      <span className="flex items-center gap-1">
+        {label}
+        {kbd && <span className="hidden font-mono text-[9.5px] text-muted-foreground xl:inline">{kbd}</span>}
+      </span>
+    </button>
+  );
+}
+
+/** Empty cart: a blank receipt and the counter's keyboard shortcuts. */
+function EmptyTicket() {
+  const keys: [string, string][] = [
+    ["F2", "Search"],
+    ["F4", "Hold sale"],
+    ["F6", "Return"],
+    ["F8", "Discount"],
+    ["F9", "Charge"],
+    ["⌘ ↵", "Charge"],
+  ];
+  return (
+    <div className="flex h-full min-h-[300px] flex-col items-center justify-center px-6 py-10 text-center">
+      <div className="w-36">
+        <div className="space-y-2 rounded-t-lg bg-muted px-4 pt-4 pb-3">
+          <span className="mx-auto block h-1.5 w-14 rounded-full bg-foreground/15" />
+          <span className="block h-px border-t border-dashed border-foreground/15" />
+          {[72, 54, 64].map((w) => (
+            <span key={w} className="flex justify-between gap-3">
+              <span className="h-1.5 rounded-full bg-foreground/10" style={{ width: `${w}%` }} />
+              <span className="h-1.5 w-5 rounded-full bg-foreground/10" />
+            </span>
+          ))}
+        </div>
+        <svg viewBox="0 0 144 8" preserveAspectRatio="none" className="block h-2 w-full text-muted" aria-hidden="true">
+          <path d="M0 0H144V2L138 8L132 2L126 8L120 2L114 8L108 2L102 8L96 2L90 8L84 2L78 8L72 2L66 8L60 2L54 8L48 2L42 8L36 2L30 8L24 2L18 8L12 2L6 8L0 2Z" fill="currentColor" />
+        </svg>
+      </div>
+      <p className="mt-6 text-[16px] font-semibold tracking-[-0.03em] [font-stretch:115%]">Ready for the next customer</p>
+      <p className="mt-1 text-[13px] text-muted-foreground">Scan a barcode or tap a product to start.</p>
+      <dl className="mt-6 grid w-full max-w-[260px] grid-cols-2 gap-x-4 gap-y-2 text-left text-[12px]">
+        {keys.map(([k, v]) => (
+          <div key={k} className="flex items-center gap-2">
+            <Kbd className="min-w-8 justify-center">{k}</Kbd>
+            <span className="text-muted-foreground">{v}</span>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/** Empty catalog: what to do first, right from the counter. */
+function EmptyCatalog({ canManage, canSell, onCustom }: { canManage: boolean; canSell: boolean; onCustom: () => void }) {
+  const actions = [
+    { href: "/products/new", icon: PackagePlus, title: "Add a product", text: "Name, price, variants, stock and barcode." },
+    { href: "/products/quick-add", icon: Zap, title: "Quick add", text: "Type a few items in a row and start selling." },
+    { href: "/products/import", icon: FileUp, title: "Import a CSV", text: "Bring your whole catalog in one go." },
+  ];
+  return (
+    <div className="mx-auto flex max-w-2xl flex-col items-center py-10 text-center sm:py-16">
+      <div className="relative h-28 w-56" aria-hidden="true">
+        {[
+          "left-2 top-4 -rotate-[10deg]",
+          "right-2 top-4 rotate-[10deg]",
+          "left-1/2 top-0 -translate-x-1/2",
+        ].map((pos, i) => (
+          <div key={i} className={cn("absolute w-24 rounded-[16px] bg-card p-1.5 shadow-[var(--shadow-raised)] ring-1 ring-border", pos)}>
+            <div className="flex aspect-[4/3] items-center justify-center rounded-[11px] bg-muted">
+              {i === 2 && <ScanBarcode className="size-6 text-primary" strokeWidth={1.6} />}
+            </div>
+            <div className="space-y-1 px-1 pt-2 pb-1">
+              <span className="block h-1.5 w-3/4 rounded-full bg-foreground/10" />
+              <span className="block h-1.5 w-1/3 rounded-full bg-primary/40" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <h2 className="mt-8 text-[26px] leading-tight tracking-[-0.045em] [font-stretch:120%]">Your counter is ready.</h2>
+      <p className="mt-2 max-w-sm text-[14px] text-muted-foreground">
+        Add what you sell and it lands right here — ready to tap, search or scan.
+      </p>
+      {canManage && (
+        <div className="mt-8 grid w-full gap-3 sm:grid-cols-3">
+          {actions.map((a) => (
+            <Link
+              key={a.href}
+              href={a.href}
+              className="group flex flex-col items-start rounded-[18px] bg-card p-5 text-left ring-1 ring-border transition-all hover:-translate-y-0.5 hover:shadow-[var(--shadow-raised)] hover:ring-border-strong"
+            >
+              <span className="flex size-9 items-center justify-center rounded-xl bg-primary-soft text-primary-soft-foreground">
+                <a.icon className="size-[17px]" />
+              </span>
+              <span className="mt-4 flex items-center gap-1 text-[14px] font-semibold">
+                {a.title}
+                <ArrowRight className="size-3.5 -translate-x-1 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
+              </span>
+              <span className="mt-1 text-[12.5px] leading-snug text-muted-foreground">{a.text}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+      {canSell && (
+        <button type="button" onClick={onCustom} className="mt-6 text-[13px] font-medium text-primary hover:underline">
+          Or sell a custom item now
+        </button>
+      )}
+    </div>
+  );
+}
+
 function QtyStep({ value, onChange, step, unit }: { value: number; onChange: (v: number) => void; step: number; unit: string | null }) {
   const [text, setText] = React.useState(String(value));
   React.useEffect(() => setText(String(value)), [value]);
   return (
-    <div className="flex items-center rounded-lg border border-border bg-card">
-      <button type="button" className="flex size-7 items-center justify-center text-muted-foreground hover:text-foreground" onClick={() => onChange(value - step)} aria-label="Decrease">
+    <div className="flex items-center rounded-full bg-muted ring-1 ring-border">
+      <button
+        type="button"
+        className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        onClick={() => onChange(value - step)}
+        aria-label="Decrease"
+      >
         <Minus className="size-3.5" />
       </button>
       <input
@@ -809,11 +1074,16 @@ function QtyStep({ value, onChange, step, unit }: { value: number; onChange: (v:
           else setText(String(value));
         }}
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-        className="num h-7 w-10 bg-transparent text-center text-[13px] font-medium outline-none"
+        className="num h-7 w-9 bg-transparent text-center text-[13px] font-semibold outline-none"
         aria-label="Quantity"
       />
       {unit && <span className="pr-1 text-[11px] text-muted-foreground">{unit}</span>}
-      <button type="button" className="flex size-7 items-center justify-center text-muted-foreground hover:text-foreground" onClick={() => onChange(value + step)} aria-label="Increase">
+      <button
+        type="button"
+        className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        onClick={() => onChange(value + step)}
+        aria-label="Increase"
+      >
         <Plus className="size-3.5" />
       </button>
     </div>

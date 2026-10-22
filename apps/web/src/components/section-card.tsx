@@ -39,13 +39,13 @@ export function SectionCard({
         <CardHeader className={cn(flush && "border-b border-border/70 pb-4")}>
           <div className="flex items-center gap-3">
             {Icon && (
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-primary">
-                <Icon className="size-[15px]" strokeWidth={1.8} />
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-muted text-primary">
+                <Icon className="size-[17px]" strokeWidth={1.7} />
               </span>
             )}
             <div className="min-w-0">
-              {title && <CardTitle>{title}</CardTitle>}
-              {description && <CardDescription className="mt-0.5">{description}</CardDescription>}
+              {title && <CardTitle className="font-display text-[17px] font-semibold tracking-[-0.01em]">{title}</CardTitle>}
+              {description && <CardDescription className="mt-0.5 text-[13px] leading-relaxed">{description}</CardDescription>}
             </div>
           </div>
           {action && <CardAction>{action}</CardAction>}

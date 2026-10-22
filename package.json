@@ -11,7 +11,7 @@
     "db:migrate:local": "npm run db:migrate:local -w @shopbooks/api",
     "db:migrate:remote": "npm run db:migrate:remote -w @shopbooks/api",
     "build": "npm run build -w @shopbooks/web",
-    "deploy": "npm run build -w @shopbooks/web && npm run deploy -w @shopbooks/api",
+    "deploy": "node scripts/deploy.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "allowScripts": {

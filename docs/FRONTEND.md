@@ -189,6 +189,8 @@ Props: `bare` (no card), `stickyHeader`, `skeletonRows`, `rowClassName(row)`. `D
 <SupplierPicker value={supplierId} onChange={(id, supplier) => …} />
 <VariantPicker onSelect={(item: SellableItem) => addLine(item)} locationId={…} autoFocus size="lg"
   priceTier="retail|wholesale" showPrice="price|cost" keepFocus />   // search + barcode scan (Enter → /products/lookup); press "/" hint
+<BarcodeInput value onChange productId compact />   // scanner-friendly (Enter never submits), warns if another product owns the code, "Generate" makes an in-store EAN-13
+// VariantPicker `onNotFound(code)`: POS uses it to offer "Add product" → /products/new?barcode=CODE (pre-fills the barcode)
 <AccountPicker value={id} onChange={(id, account) => …} types={["expense"]} subtypes={["cash","bank"]} excludeIds={[…]} clearable />
 useAccounts()   // Account[] cached
 <PaymentMethodSelect value={methodId} onChange={setMethodId} types={["cash"]} />   PAYMENT_METHOD_ICONS[type]

@@ -82,7 +82,7 @@ export function DataTable<T>({
   const table = (
     <>
       {toolbar && (
-        <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="flex flex-col gap-2 border-b border-border/60 bg-muted/25 px-4 py-3.5 sm:flex-row sm:flex-wrap sm:items-center sm:px-5">
           {toolbar}
         </div>
       )}
@@ -146,7 +146,7 @@ export function DataTable<T>({
 
   if (bare) return <div className={className}>{table}</div>;
   return (
-    <div className={cn("overflow-hidden rounded-2xl bg-card shadow-card dark:shadow-[inset_0_0_0_1px_var(--border)]", className)}>{table}</div>
+    <div className={cn("overflow-hidden rounded-3xl bg-card shadow-card dark:shadow-[inset_0_0_0_1px_var(--border)]", className)}>{table}</div>
   );
 }
 
@@ -172,7 +172,7 @@ export function Pagination({ page, pageSize, total, onPageChange, onPageSizeChan
   }, [page, pages]);
 
   return (
-    <div className="flex flex-col items-center justify-between gap-3 border-t border-border px-4 py-3 text-[13px] sm:flex-row">
+    <div className="flex flex-col items-center justify-between gap-3 border-t border-border/60 bg-muted/25 px-4 py-3 text-[13px] sm:flex-row sm:px-5">
       <div className="flex items-center gap-3 text-muted-foreground">
         <span className="num">
           Showing <span className="font-medium text-foreground">{formatNumber(from)}</span>–

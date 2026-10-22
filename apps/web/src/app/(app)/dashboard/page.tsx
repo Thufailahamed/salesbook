@@ -5,10 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  ArrowDownRight,
   ArrowRight,
+  ArrowUpRight,
   Banknote,
   Boxes,
-  CircleDollarSign,
   HandCoins,
   PackagePlus,
   Receipt,
@@ -21,8 +22,8 @@ import {
 } from "lucide-react";
 import type { DashboardData } from "@shopbooks/shared";
 import { PageHeader, usePageTitle } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
 import { SectionCard } from "@/components/section-card";
+import { DailyAlerts } from "@/components/daily-alerts";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/loading";
 import { Money } from "@/components/money";
@@ -68,6 +69,7 @@ export default function DashboardPage() {
   const monthDelta = d ? percentChange(d.month.netSales, d.lastMonth.netSales) : null;
   const trend = d?.salesTrend ?? [];
   const hasSales = trend.some((t) => t.netSales !== 0) || (d?.recentInvoices.length ?? 0) > 0;
+  const salesDays = trend.filter((t) => t.netSales !== 0).length;
 
   return (
     <>
@@ -97,6 +99,7 @@ export default function DashboardPage() {
         <ErrorState message={error.message} onRetry={() => refetch()} />
       ) : (
         <div className="grid gap-6">
+          <DailyAlerts />
           {d?.openShift && (
             <Link
               href={`/registers/view?id=${d.openShift.id}`}
@@ -114,76 +117,14 @@ export default function DashboardPage() {
             </Link>
           )}
 
-          {/* primary KPIs */}
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard
-              variant="feature"
-              label="Today's sales"
-              value={money.format(d?.today.netSales)}
-              icon={CircleDollarSign}
-              delta={todayDelta}
-              deltaLabel="vs yesterday"
-              sublabel={d && todayDelta === null ? `${formatNumber(d.today.invoices)} invoices` : undefined}
-              sparkline={trend.slice(-14).map((t) => t.netSales)}
-              loading={isLoading}
-              href="/sales"
-            />
-            <StatCard
-              label="Gross profit today"
-              value={money.format(d?.today.grossProfit)}
-              icon={TrendingUp}
-              tone="success"
-              sublabel={
-                d
-                  ? `${d.today.netSales ? Math.round((d.today.grossProfit / d.today.netSales) * 100) : 0}% margin · ${formatNumber(
-                      d.today.invoices,
-                    )} sales`
-                  : undefined
-              }
-              sparkline={trend.slice(-14).map((t) => t.grossProfit)}
-              sparklineColor="var(--chart-2)"
-              loading={isLoading}
-            />
-            <StatCard
-              label="This month"
-              value={money.format(d?.month.netSales)}
-              icon={Receipt}
-              tone="info"
-              delta={monthDelta}
-              deltaLabel="vs last month"
-              sublabel={d && monthDelta === null ? "net sales" : undefined}
-              loading={isLoading}
-              href="/reports/sales"
-            />
-            <StatCard
-              label="Net profit this month"
-              value={<span className={cn(d && d.month.netProfit < 0 && "text-destructive")}>{money.format(d?.month.netProfit)}</span>}
-              icon={Wallet}
-              tone={d && d.month.netProfit < 0 ? "danger" : "primary"}
-              sublabel={d ? `after ${money.format(d.month.expenses)} expenses` : undefined}
-              loading={isLoading}
-              href="/reports/profit-loss"
-            />
+          {/* today + this month */}
+          <div className="grid gap-4 xl:grid-cols-3">
+            <TodayPanel d={d} loading={isLoading} delta={todayDelta} trend={trend} />
+            <MonthLedger d={d} loading={isLoading} delta={monthDelta} />
           </div>
 
-          {/* secondary KPIs */}
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-            <StatCard size="sm" label="Receivables" value={money.format(d?.receivables)} icon={HandCoins} tone="warning" loading={isLoading} href="/reports/receivables" />
-            <StatCard size="sm" label="Payables" value={money.format(d?.payables)} icon={WalletCards} tone="neutral" loading={isLoading} href="/reports/payables" />
-            <StatCard size="sm" label="Cash on hand" value={money.format(d?.cashBalance)} icon={Banknote} tone="success" loading={isLoading} href="/accounting" />
-            <StatCard size="sm" label="Inventory value" value={money.format(d?.inventoryValue)} icon={Boxes} tone="info" loading={isLoading} href="/reports/inventory" />
-            <StatCard
-              size="sm"
-              label="Low stock items"
-              value={formatNumber(d?.lowStockCount ?? 0)}
-              icon={AlertTriangle}
-              tone={d && d.lowStockCount > 0 ? "warning" : "neutral"}
-              sublabel={d && d.outOfStockCount > 0 ? `${formatNumber(d.outOfStockCount)} out of stock` : undefined}
-              loading={isLoading}
-              href="/inventory?stock=low"
-              className="col-span-2 md:col-span-1"
-            />
-          </div>
+          {/* financial position */}
+          <PositionStrip d={d} loading={isLoading} />
 
           {/* charts row */}
           <div className="grid gap-6 xl:grid-cols-3">
@@ -204,6 +145,19 @@ export default function DashboardPage() {
             >
               {isLoading ? (
                 <Skeleton className="h-[280px] w-full rounded-lg" />
+              ) : hasSales && salesDays < 5 ? (
+                <SimpleBarChart
+                  data={trend}
+                  xKey="date"
+                  height={280}
+                  series={[
+                    { key: "netSales", name: "Net sales" },
+                    { key: "grossProfit", name: "Gross profit", color: "var(--chart-2)" },
+                  ]}
+                  xFormatter={(v) => formatDate(v, { month: "short", day: "numeric" })}
+                  yFormatter={(v) => money.formatCompact(v)}
+                  valueFormatter={(v) => money.format(v)}
+                />
               ) : hasSales ? (
                 <TrendAreaChart
                   data={trend}
@@ -445,6 +399,238 @@ function ListSkeleton({ rows = 5 }: { rows?: number }) {
           <Skeleton className="h-4 w-16" />
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- headline pieces
+
+function DeltaChip({ value, label, onDark }: { value: number | null; label: string; onDark?: boolean }) {
+  if (value === null) return null;
+  const up = value >= 0;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold",
+        onDark
+          ? up
+            ? "bg-[oklch(0.82_0.09_84/0.16)] text-[oklch(0.88_0.08_86)]"
+            : "bg-[oklch(0.66_0.18_25/0.2)] text-[oklch(0.82_0.1_25)]"
+          : up
+            ? "bg-success-soft text-success-soft-foreground"
+            : "bg-destructive-soft text-destructive-soft-foreground",
+      )}
+    >
+      {up ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+      {Math.abs(value).toFixed(1)}%
+      <span className={cn("font-normal", onDark ? "text-white/45" : "text-muted-foreground")}>{label}</span>
+    </span>
+  );
+}
+
+/** The headline: today's takings on the black card, with the last 14 days as bars. */
+function TodayPanel({
+  d,
+  loading,
+  delta,
+  trend,
+}: {
+  d: DashboardData | undefined;
+  loading: boolean;
+  delta: number | null;
+  trend: DashboardData["salesTrend"];
+}) {
+  const money = useMoney();
+  const days = trend.slice(-14);
+  const max = Math.max(1, ...days.map((t) => t.netSales));
+  const margin = d && d.today.netSales ? Math.round((d.today.grossProfit / d.today.netSales) * 100) : 0;
+  const stats = d
+    ? [
+        { label: "Invoices", value: formatNumber(d.today.invoices) },
+        { label: "Avg basket", value: money.format(d.today.avgBasket) },
+        { label: "Gross profit", value: money.format(d.today.grossProfit), sub: d.today.netSales ? `${margin}%` : undefined },
+        { label: "Collected", value: money.format(d.today.collected) },
+      ]
+    : [];
+
+  return (
+    <Link href="/sales" className="metal group relative block overflow-hidden rounded-[22px] p-6 sm:p-7 xl:col-span-2">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_70%_at_90%_0%,oklch(0.82_0.09_84/0.12),transparent)]" />
+      <div className="relative grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-end">
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10.5px] font-semibold tracking-[0.18em] text-white/45 uppercase [font-stretch:115%]">Today&apos;s sales</p>
+            <ArrowUpRight className="size-4 text-white/30 transition-colors group-hover:text-[oklch(0.86_0.08_86)]" />
+          </div>
+          {loading || !d ? (
+            <Skeleton className="mt-4 h-12 w-56 bg-white/10" />
+          ) : (
+            <p className="figure text-gold mt-3 text-[44px] leading-none sm:text-[52px]">{money.format(d.today.netSales)}</p>
+          )}
+          <div className="mt-3 flex min-h-6 flex-wrap items-center gap-2">
+            {d && <DeltaChip value={delta} label="vs yesterday" onDark />}
+            {d && delta === null && <span className="text-[12px] text-white/45">Yesterday {money.format(d.yesterday.netSales)}</span>}
+          </div>
+          <dl className="mt-7 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-white/10 pt-5 sm:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4">
+            {loading || !d
+              ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-9 bg-white/10" />)
+              : stats.map((s) => (
+                  <div key={s.label} className="min-w-0">
+                    <dt className="text-[10px] font-semibold tracking-[0.14em] text-white/40 uppercase">{s.label}</dt>
+                    <dd className="num mt-1 truncate text-[15px] font-semibold text-white/90">
+                      {s.value}
+                      {s.sub && <span className="ml-1.5 text-[11.5px] font-medium text-[oklch(0.84_0.09_84)]">{s.sub}</span>}
+                    </dd>
+                  </div>
+                ))}
+          </dl>
+        </div>
+
+        {/* last 14 days */}
+        <div aria-hidden="true">
+          <div className="flex h-36 items-end gap-1.5 sm:h-44">
+            {(days.length ? days : Array.from({ length: 14 }, () => null)).map((t, i, arr) => {
+              const last = i === arr.length - 1;
+              const h = t ? Math.max(t.netSales > 0 ? 6 : 2, (t.netSales / max) * 100) : 2;
+              return (
+                <div key={t?.date ?? i} className="group/bar relative flex h-full flex-1 flex-col justify-end">
+                  {t && t.netSales > 0 && (
+                    <span className="pointer-events-none absolute -top-1 left-1/2 z-10 hidden -translate-x-1/2 -translate-y-full rounded-md bg-black/80 px-2 py-1 text-[10.5px] whitespace-nowrap text-white group-hover/bar:block">
+                      {formatDate(t.date, { month: "short", day: "numeric" })} · {money.format(t.netSales)}
+                    </span>
+                  )}
+                  <span
+                    className={cn(
+                      "w-full rounded-t-[5px] transition-colors",
+                      last
+                        ? "bg-gradient-to-t from-[oklch(0.82_0.09_84/0.35)] to-[oklch(0.88_0.08_86)]"
+                        : t && t.netSales > 0
+                          ? "bg-white/[0.16] group-hover/bar:bg-white/30"
+                          : "bg-white/[0.06]",
+                    )}
+                    style={{ height: `${h}%` }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex justify-between text-[10px] tracking-[0.12em] text-white/35 uppercase">
+            <span>{days[0] ? formatDate(days[0].date, { month: "short", day: "numeric" }) : "14 days ago"}</span>
+            <span className="text-[oklch(0.84_0.09_84)]">Today</span>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+/** This month as a tiny P&L: sales → cost of goods → gross profit → expenses → net profit. */
+function MonthLedger({ d, loading, delta }: { d: DashboardData | undefined; loading: boolean; delta: number | null }) {
+  const money = useMoney();
+  const m = d?.month;
+  const base = Math.max(1, m?.netSales ?? 0);
+  const cogs = m ? m.netSales - m.grossProfit : 0;
+  const rows = m
+    ? [
+        { label: "Net sales", value: m.netSales, bar: m.netSales, tone: "bg-foreground/25" },
+        { label: "Cost of goods", value: -cogs, bar: cogs, tone: "bg-foreground/12" },
+        { label: "Gross profit", value: m.grossProfit, bar: m.grossProfit, tone: "bg-primary/60", strong: true },
+        { label: "Expenses", value: -m.expenses, bar: m.expenses, tone: "bg-foreground/12" },
+      ]
+    : [];
+
+  return (
+    <Link
+      href="/reports/profit-loss"
+      className="group flex flex-col rounded-[22px] bg-card p-6 shadow-[var(--shadow-card)] ring-1 ring-border transition-shadow hover:shadow-[var(--shadow-raised)] sm:p-7"
+    >
+      <div className="flex items-center justify-between">
+        <p className="eyebrow">This month</p>
+        <ArrowUpRight className="size-4 text-muted-foreground/50 transition-colors group-hover:text-primary" />
+      </div>
+      {loading || !m ? (
+        <Skeleton className="mt-3 h-9 w-40" />
+      ) : (
+        <p className="figure mt-2 text-[32px] leading-none">{money.format(m.netSales)}</p>
+      )}
+      <div className="mt-2.5 min-h-6">{d && (delta === null ? <span className="text-[12px] text-muted-foreground">net sales so far</span> : <DeltaChip value={delta} label="vs last month" />)}</div>
+
+      <dl className="mt-5 grid gap-3">
+        {loading || !m
+          ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-7" />)
+          : rows.map((r) => (
+              <div key={r.label}>
+                <div className="flex items-baseline justify-between gap-3 text-[13px]">
+                  <dt className={cn(r.strong ? "font-medium" : "text-muted-foreground")}>{r.label}</dt>
+                  <dd className={cn("num", r.strong && "font-semibold")}>{money.format(r.value)}</dd>
+                </div>
+                <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
+                  <div className={cn("h-full rounded-full", r.tone)} style={{ width: `${Math.min(100, Math.max(0, (r.bar / base) * 100))}%` }} />
+                </div>
+              </div>
+            ))}
+      </dl>
+
+      <div className="mt-auto flex items-end justify-between border-t-[3px] border-double border-border-strong pt-4">
+        <span className="text-[12px] font-semibold tracking-[0.14em] text-muted-foreground uppercase [font-stretch:115%]">Net profit</span>
+        {loading || !m ? (
+          <Skeleton className="h-7 w-28" />
+        ) : (
+          <span className={cn("figure text-[26px] leading-none", m.netProfit < 0 ? "text-destructive" : "text-success-soft-foreground")}>
+            {money.format(m.netProfit)}
+          </span>
+        )}
+      </div>
+    </Link>
+  );
+}
+
+/** Where the money sits right now: one strip, five figures. */
+function PositionStrip({ d, loading }: { d: DashboardData | undefined; loading: boolean }) {
+  const money = useMoney();
+  const items = [
+    { label: "Cash on hand", value: d ? money.format(d.cashBalance) : null, href: "/accounting", icon: Banknote },
+    { label: "Receivables", value: d ? money.format(d.receivables) : null, href: "/reports/receivables", icon: HandCoins, sub: "owed to you" },
+    { label: "Payables", value: d ? money.format(d.payables) : null, href: "/reports/payables", icon: WalletCards, sub: "you owe" },
+    { label: "Inventory", value: d ? money.format(d.inventoryValue) : null, href: "/reports/inventory", icon: Boxes, sub: "at cost" },
+  ];
+  const low = d?.lowStockCount ?? 0;
+  const out = d?.outOfStockCount ?? 0;
+  return (
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[22px] bg-border shadow-[var(--shadow-card)] ring-1 ring-border md:grid-cols-5">
+      {items.map((it) => (
+        <Link key={it.label} href={it.href} className="group bg-card p-5 transition-colors hover:bg-accent/50">
+          <span className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
+            <it.icon className="size-[15px]" strokeWidth={1.8} />
+            {it.label}
+            <ArrowUpRight className="ml-auto size-3.5 opacity-0 transition-opacity group-hover:opacity-100" />
+          </span>
+          {loading || it.value == null ? (
+            <Skeleton className="mt-2.5 h-6 w-24" />
+          ) : (
+            <p className="figure mt-2 text-[21px] leading-none">{it.value}</p>
+          )}
+          {it.sub && <p className="mt-1.5 text-[11.5px] text-muted-foreground">{it.sub}</p>}
+        </Link>
+      ))}
+      <Link
+        href="/inventory?stock=low"
+        className={cn("group col-span-2 p-5 transition-colors md:col-span-1", low > 0 ? "bg-warning-soft hover:bg-warning-soft/80" : "bg-card hover:bg-accent/50")}
+      >
+        <span className={cn("flex items-center gap-2 text-[12.5px]", low > 0 ? "text-warning-soft-foreground" : "text-muted-foreground")}>
+          <AlertTriangle className="size-[15px]" strokeWidth={1.8} />
+          Low stock
+          <ArrowUpRight className="ml-auto size-3.5 opacity-0 transition-opacity group-hover:opacity-100" />
+        </span>
+        {loading || !d ? (
+          <Skeleton className="mt-2.5 h-6 w-12" />
+        ) : (
+          <p className={cn("figure mt-2 text-[21px] leading-none", low > 0 && "text-warning-soft-foreground")}>{formatNumber(low)}</p>
+        )}
+        <p className={cn("mt-1.5 text-[11.5px]", low > 0 ? "text-warning-soft-foreground/80" : "text-muted-foreground")}>
+          {d ? (low === 0 ? "all healthy" : out > 0 ? `${formatNumber(out)} out of stock` : "items to reorder") : " "}
+        </p>
+      </Link>
     </div>
   );
 }

@@ -3,8 +3,7 @@
 import * as React from "react";
 import { CalendarClock, PackageX, Timer } from "lucide-react";
 import type { ExpiryReport } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
-import { SectionCard } from "@/components/section-card";
+import { ReportPage, ReportSection } from "@/components/report-shell";
 import { StatCard } from "@/components/stat-card";
 import { EmptyState } from "@/components/empty-state";
 import { Money } from "@/components/money";
@@ -44,7 +43,7 @@ export default function ExpiryReportPage() {
             <StatCard label={`Expiring in ${r.days} days`} value={money.format(r.expiringValue)} icon={Timer} tone="warning" sublabel={`${r.expiringCount} batch${r.expiringCount === 1 ? "" : "es"}`} />
             <StatCard label="As of" value={formatDate(r.asOf)} icon={CalendarClock} tone="info" />
           </div>
-          <SectionCard title="Batches" flush>
+          <ReportSection title="Batches" flush>
             {r.rows.length === 0 ? (
               <EmptyState compact title="Nothing expiring" description={`No stock with an expiry date within ${r.days} days.`} />
             ) : (
@@ -82,7 +81,7 @@ export default function ExpiryReportPage() {
                 </TableBody>
               </Table>
             )}
-          </SectionCard>
+          </ReportSection>
         </div>
       )}
     </ReportPage>

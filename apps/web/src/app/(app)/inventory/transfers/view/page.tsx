@@ -6,9 +6,8 @@ import { ArrowRight } from "lucide-react";
 import type { StockTransfer } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { DetailSkeleton, ErrorState } from "@/components/loading";
-import { SectionCard } from "@/components/section-card";
+import { DocPanel } from "@/components/doc-detail";
 import { KeyValue } from "@/components/key-value";
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useApiQuery } from "@/hooks/use-api";
 import { formatDate, formatDateTime, formatQty } from "@/lib/utils";
 
@@ -27,52 +26,67 @@ function TransferView() {
   if (isLoading) return <DetailSkeleton />;
   if (error || !t) return <ErrorState message={error?.message ?? "Transfer not found"} onRetry={() => refetch()} />;
 
+  const lines = t.lines ?? [];
+
   return (
     <>
       <PageHeader
         backHref="/inventory/transfers"
         breadcrumbs={[{ label: "Transfers", href: "/inventory/transfers" }, { label: t.number }]}
         eyebrow="Stock transfer"
-        title={t.number}
-        description={
-          <span className="flex items-center gap-2">
-            {t.fromLocationName} <ArrowRight className="size-3.5" /> {t.toLocationName} · {formatDate(t.date)}
-          </span>
-        }
+        title={<span className="font-mono tracking-tight">{t.number}</span>}
+        description={formatDate(t.date)}
       />
+
+      {/* Route: where the stock left and where it landed. */}
+      <section className="metal relative mb-6 overflow-hidden rounded-3xl p-6 text-white sm:p-8">
+        <div className="grid items-center gap-6 sm:grid-cols-[1fr_auto_1fr]">
+          <div className="min-w-0">
+            <p className="eyebrow text-white/50">From</p>
+            <p className="font-display mt-2 truncate text-2xl font-semibold tracking-[-0.02em]">{t.fromLocationName}</p>
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <span className="flex size-12 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/10">
+              <ArrowRight className="size-5 text-highlight" />
+            </span>
+            <p className="figure text-xl text-gold">{formatQty(t.totalQuantity)}</p>
+            <p className="num text-[12px] text-white/50">
+              {t.itemCount} {t.itemCount === 1 ? "item" : "items"}
+            </p>
+          </div>
+          <div className="min-w-0 sm:text-right">
+            <p className="eyebrow text-white/50">To</p>
+            <p className="font-display mt-2 truncate text-2xl font-semibold tracking-[-0.02em]">{t.toLocationName}</p>
+          </div>
+        </div>
+      </section>
+
       <div className="grid gap-6 lg:grid-cols-3">
-        <SectionCard title="Items" flush className="lg:col-span-2">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead>Item</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead align="right">Quantity</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(t.lines ?? []).map((l) => (
-                <TableRow key={l.id} className="hover:bg-transparent">
-                  <TableCell className="font-medium">
+        <DocPanel
+          title="Items"
+          aside={<span className="label-caps text-muted-foreground">{lines.length} lines</span>}
+          flush
+          className="lg:col-span-2"
+        >
+          <ul className="divide-y divide-border/60">
+            {lines.map((l) => (
+              <li key={l.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 px-6 py-4">
+                <span className="num flex size-11 items-center justify-center rounded-xl bg-muted font-display text-[15px] font-semibold">
+                  {formatQty(l.quantity)}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate font-medium">
                     {l.productName}
                     {l.variantName && <span className="font-normal text-muted-foreground"> · {l.variantName}</span>}
-                  </TableCell>
-                  <TableCell className="font-mono text-[12.5px] text-muted-foreground">{l.sku ?? "—"}</TableCell>
-                  <TableCell numeric className="font-semibold">
-                    {formatQty(l.quantity)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-            <TableFooter>
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={2}>{t.itemCount} items</TableCell>
-                <TableCell numeric>{formatQty(t.totalQuantity)}</TableCell>
-              </TableRow>
-            </TableFooter>
-          </Table>
-        </SectionCard>
-        <SectionCard title="Details" className="self-start">
+                  </p>
+                  <p className="mt-0.5 font-mono text-[11.5px] text-muted-foreground">{l.sku ?? "—"}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </DocPanel>
+
+        <DocPanel title="Details" className="self-start">
           <KeyValue
             items={[
               { label: "From", value: t.fromLocationName },
@@ -83,7 +97,7 @@ function TransferView() {
               { label: "Note", value: t.note, hideEmpty: true },
             ]}
           />
-        </SectionCard>
+        </DocPanel>
       </div>
     </>
   );

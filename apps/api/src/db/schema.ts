@@ -33,6 +33,8 @@ export const businesses = sqliteTable("businesses", {
   taxInclusive: bool("tax_inclusive", true),
   allowNegativeStock: bool("allow_negative_stock", false),
   requireShift: bool("require_shift", false),
+  /** JSON array of AI feature keys this business has switched off. */
+  aiDisabled: text("ai_disabled").notNull().default("[]"),
   roundingIncrement: integer("rounding_increment").notNull().default(0),
   lowStockThreshold: real("low_stock_threshold").notNull().default(5),
   defaultTaxRateId: text("default_tax_rate_id"),

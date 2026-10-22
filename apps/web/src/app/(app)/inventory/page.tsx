@@ -7,6 +7,7 @@ import { ArrowLeftRight, Boxes, Download, PackageSearch, SlidersHorizontal, Tag,
 import { toast } from "sonner";
 import type { Category, Paginated, StockLevelRow } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
+import { ReorderAdviceCard } from "@/components/reorder-advice";
 import { DataTable, type Column } from "@/components/data-table";
 import { FilterSelect, SearchInput } from "@/components/filters";
 import { LocationSelect } from "@/components/entity-selects";
@@ -148,6 +149,10 @@ function StockPage() {
           </>
         }
       />
+
+      <div className="mb-6">
+        <ReorderAdviceCard locationId={locationId} />
+      </div>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <StatCard size="sm" label="Units on hand" value={formatQty(t?.quantity ?? 0)} icon={Boxes} tone="info" loading={isLoading} />

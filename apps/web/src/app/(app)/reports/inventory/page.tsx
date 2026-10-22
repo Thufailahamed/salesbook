@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { Boxes, Tag, Wallet } from "lucide-react";
 import type { InventoryValuationReport } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
-import { SectionCard } from "@/components/section-card";
+import { ReportPage, ReportSection } from "@/components/report-shell";
 import { StatCard } from "@/components/stat-card";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { EmptyState } from "@/components/empty-state";
@@ -34,14 +33,14 @@ export default function InventoryValuationPage() {
             <StatCard label="Units on hand" value={formatQty(r.totalQuantity)} icon={Boxes} tone="info" />
           </div>
           <div className="grid gap-6 xl:grid-cols-3">
-            <SectionCard title="Value by category">
+            <ReportSection title="Value by category">
               {r.byCategory.length === 0 ? (
                 <EmptyState compact title="No stock" />
               ) : (
                 <DonutChart data={r.byCategory.map((c) => ({ name: c.name, value: c.value }))} valueFormatter={(v) => money.format(v)} centerValue={money.formatCompact(r.totalValue)} centerLabel="at cost" height={190} />
               )}
-            </SectionCard>
-            <SectionCard title="Categories" flush className="xl:col-span-2">
+            </ReportSection>
+            <ReportSection title="Categories" flush className="xl:col-span-2">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -59,9 +58,9 @@ export default function InventoryValuationPage() {
                   ))}
                 </TableBody>
               </Table>
-            </SectionCard>
+            </ReportSection>
           </div>
-          <SectionCard title="Items" flush>
+          <ReportSection title="Items" flush>
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -98,7 +97,7 @@ export default function InventoryValuationPage() {
                 </TableRow>
               </TableFooter>
             </Table>
-          </SectionCard>
+          </ReportSection>
         </div>
       )}
     </ReportPage>

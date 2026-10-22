@@ -13,10 +13,11 @@ import {
   Receipt,
   RotateCcw,
   ShoppingCart,
+  Sparkles,
   Star,
   WalletCards,
 } from "lucide-react";
-import type { Customer, Invoice, Paginated, Payment, SaleReturn } from "@shopbooks/shared";
+import type { AiStatus, Customer, Invoice, Paginated, Payment, SaleReturn } from "@shopbooks/shared";
 import { TENDER_LABELS } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { DetailSkeleton, ErrorState } from "@/components/loading";
@@ -30,6 +31,7 @@ import { PaymentStatusBadge, ActiveBadge, StatusBadge } from "@/components/statu
 import { StatementCard } from "@/components/statement-card";
 import { useConfirm } from "@/components/confirm-dialog";
 import { ApplyCreditDialog, CreditRefundDialog, CustomerFormDialog, PartyPaymentDialog } from "@/components/party-dialogs";
+import { ReminderDraftDialog } from "@/components/reminder-draft-dialog";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,6 +68,8 @@ function CustomerView() {
   const [payOpen, setPayOpen] = React.useState(false);
   const [applyOpen, setApplyOpen] = React.useState(false);
   const [refundOpen, setRefundOpen] = React.useState(false);
+  const [reminderOpen, setReminderOpen] = React.useState(false);
+  const aiStatus = useApiQuery<AiStatus>("/ai/status", undefined, { staleTime: Infinity });
 
   const setActive = useApiMutation(
     (active: boolean) =>
@@ -113,6 +117,11 @@ function CustomerView() {
                 <Link href={`/pos?customerId=${c.id}`}>
                   <ShoppingCart /> New sale
                 </Link>
+              </Button>
+            )}
+            {aiStatus.data?.reminderDraft && c.dueBalance > 0 && (
+              <Button variant="outline" onClick={() => setReminderOpen(true)}>
+                <Sparkles /> Draft reminder
               </Button>
             )}
             {canPay && c.dueBalance > 0 && (
@@ -274,6 +283,7 @@ function CustomerView() {
       <PartyPaymentDialog open={payOpen} onOpenChange={setPayOpen} kind="customer" partyId={c.id} partyName={c.name} balance={c.dueBalance} />
       <ApplyCreditDialog open={applyOpen} onOpenChange={setApplyOpen} kind="customer" partyId={c.id} credit={c.creditBalance} />
       <CreditRefundDialog open={refundOpen} onOpenChange={setRefundOpen} kind="customer" partyId={c.id} credit={c.creditBalance} />
+      <ReminderDraftDialog open={reminderOpen} onOpenChange={setReminderOpen} kind="customer" partyId={c.id} />
     </>
   );
 }

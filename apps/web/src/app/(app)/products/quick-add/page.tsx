@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import type { ProductInput } from "@shopbooks/shared";
+import { BarcodeInput } from "@/components/barcode-input";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { MoneyInput } from "@/components/money-input";
@@ -20,13 +21,14 @@ import { api } from "@/lib/api";
 interface Row {
   id: number;
   name: string;
+  barcode: string;
   /** Minor units */
   price: number;
 }
 
 const START_ROWS = 5;
 let nextId = 0;
-const blankRow = (): Row => ({ id: ++nextId, name: "", price: 0 });
+const blankRow = (): Row => ({ id: ++nextId, name: "", barcode: "", price: 0 });
 
 export default function QuickAddPage() {
   const { can, taxRates, locationId } = useSession();
@@ -62,7 +64,7 @@ export default function QuickAddPage() {
     focusAfterRender.current = row.id;
   };
 
-  /** Pasting several lines (name, tab, price — copied from a spreadsheet) fills rows from the focused one. */
+  /** Pasting several lines (name, tab, price, tab, barcode — copied from a spreadsheet) fills rows from the focused one. */
   const onPaste = (id: number, e: React.ClipboardEvent<HTMLInputElement>) => {
     const text = e.clipboardData.getData("text");
     if (!/[\n\t]/.test(text)) return;
@@ -71,7 +73,11 @@ export default function QuickAddPage() {
       .split(/\r?\n/)
       .map((line) => line.split("\t"))
       .filter((cells) => cells[0]?.trim())
-      .map((cells) => ({ name: cells[0]!.trim(), price: money.toMinor(Number((cells[1] ?? "").replace(/,/g, "")) || 0) }));
+      .map((cells) => ({
+        name: cells[0]!.trim(),
+        price: money.toMinor(Number((cells[1] ?? "").replace(/,/g, "")) || 0),
+        barcode: (cells[2] ?? "").trim(),
+      }));
     setRows((rs) => {
       const i = rs.findIndex((r) => r.id === id);
       const created = parsed.map((p) => ({ ...blankRow(), ...p }));
@@ -107,7 +113,7 @@ export default function QuickAddPage() {
             name: "",
             options: {},
             sku: null,
-            barcode: null,
+            barcode: r.barcode.trim() || null,
             price: r.price,
             wholesalePrice: null,
             costPrice: 0,
@@ -140,7 +146,7 @@ export default function QuickAddPage() {
     <>
       <PageHeader
         title="Quick add"
-        description="Type a name and a price, press Enter for the next row, then save them all at once. Products are created as untracked, so add stock or details later."
+        description="Type a name, scan the barcode if it has one, and enter a price; press Enter for the next row, then save them all at once. Products are created as untracked, so add stock or details later."
         actions={
           <Button variant="outline" asChild>
             <Link href="/products/import">Import from CSV</Link>
@@ -168,6 +174,7 @@ export default function QuickAddPage() {
             <TableRow className="bg-muted/40 hover:bg-muted/40">
               <TableHead className="w-12">#</TableHead>
               <TableHead>Name</TableHead>
+              <TableHead className="w-64">Barcode</TableHead>
               <TableHead className="w-56" align="right">Price</TableHead>
               <TableHead className="w-12" />
             </TableRow>
@@ -190,6 +197,19 @@ export default function QuickAddPage() {
                       }
                     }}
                   />
+                </TableCell>
+                <TableCell>
+                  <div
+                    onKeyDown={(e) => {
+                      // a scanner ends with Enter → move on to the price
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        document.getElementById(`quick-price-${r.id}`)?.focus();
+                      }
+                    }}
+                  >
+                    <BarcodeInput compact value={r.barcode} onChange={(v) => update(r.id, { barcode: v })} />
+                  </div>
                 </TableCell>
                 <TableCell>
                   <MoneyInput

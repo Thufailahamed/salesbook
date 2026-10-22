@@ -45,7 +45,12 @@ function localeFor(country: string | null | undefined, currency: string) {
 }
 
 /** Creates a business with its owner and all defaults in one atomic batch. */
-export async function createBusiness(db: DB, input: SignupInput, passwordHash: string) {
+export async function createBusiness(
+  db: DB,
+  input: SignupInput,
+  passwordHash: string,
+  subscription?: { planId: string; endsAt: number | null },
+) {
   const now = Date.now();
   const businessId = newId();
   const userId = newId();
@@ -90,6 +95,8 @@ export async function createBusiness(db: DB, input: SignupInput, passwordHash: s
       loyaltyEarnPer: 100 * 10 ** decimals,
       loyaltyPointValue: 10 ** decimals,
       roundingIncrement: 0,
+      planId: subscription?.planId ?? null,
+      subscriptionEndsAt: subscription?.endsAt ?? null,
       createdAt: now,
     }) as unknown as Stmt,
     db.insert(users).values({

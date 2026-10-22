@@ -156,7 +156,7 @@ export function DocHeader({
   return (
     <div className="flex flex-col gap-6 border-b border-neutral-200 pb-6 sm:flex-row sm:items-start sm:justify-between print:flex-row">
       <BusinessBlock />
-      <div className="shrink-0 text-left sm:text-right print:text-right">
+      <div className="min-w-0 text-left sm:max-w-[55%] sm:text-right print:max-w-[55%] print:text-right">
         <p className="font-display text-2xl font-semibold tracking-[-0.03em] text-neutral-900 uppercase">{title}</p>
         {number && <p className="mt-0.5 font-mono text-sm font-semibold text-neutral-700">{number}</p>}
         {badge && <div className="mt-1.5 flex sm:justify-end print:justify-end">{badge}</div>}
@@ -201,6 +201,7 @@ export interface PrintColumn<T> {
 /** Plain table for printed documents. */
 export function PrintTable<T>({ columns, rows, rowKey }: { columns: PrintColumn<T>[]; rows: T[]; rowKey: (row: T, i: number) => string }) {
   return (
+    <div className="w-full overflow-x-auto">
     <table className="w-full border-collapse text-[12px]">
       <thead>
         <tr className="border-b-2 border-neutral-800">
@@ -237,6 +238,7 @@ export function PrintTable<T>({ columns, rows, rowKey }: { columns: PrintColumn<
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 

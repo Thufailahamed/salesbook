@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Package, ScanBarcode } from "lucide-react";
 import { toast } from "sonner";
-import { promoPrice, type SellableItem } from "@shopbooks/shared";
+import { promoPrice, type AiStatus, type SellableItem } from "@shopbooks/shared";
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
@@ -34,6 +34,8 @@ export interface VariantPickerProps {
   /** Keep focus in the input after selecting (rapid entry). Default true */
   keepFocus?: boolean;
   disabled?: boolean;
+  /** Called when Enter on a code finds no product (e.g. to offer adding it). Default: an error toast. */
+  onNotFound?: (code: string) => void;
 }
 
 /**
@@ -55,6 +57,7 @@ export const VariantPicker = React.forwardRef<HTMLInputElement, VariantPickerPro
     size = "default",
     keepFocus = true,
     disabled,
+    onNotFound,
   },
   ref,
 ) {
@@ -74,6 +77,14 @@ export const VariantPicker = React.forwardRef<HTMLInputElement, VariantPickerPro
     { staleTime: 10_000 },
   );
   const items = results.data ?? [];
+  const aiStatus = useApiQuery<AiStatus>("/ai/status", undefined, { staleTime: Infinity });
+  // Only when the normal search found nothing: ask the AI for the closest products.
+  const closest = useApiQuery<SellableItem[]>(
+    dq.length >= 2 && !results.isFetching && items.length === 0 && aiStatus.data?.productSearch ? "/ai/product-search" : null,
+    { q: dq, locationId: loc },
+    { staleTime: 60_000 },
+  );
+  const closestItems = closest.data ?? [];
 
   const pick = (item: SellableItem) => {
     onSelect(item);
@@ -88,7 +99,13 @@ export const VariantPicker = React.forwardRef<HTMLInputElement, VariantPickerPro
       const item = await api.get<SellableItem>("/products/lookup", { code, locationId: loc });
       pick(item);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) toast.error(`No product found for “${code}”`);
+      if (e instanceof ApiError && e.status === 404) {
+        if (onNotFound) {
+          onNotFound(code);
+          setQuery("");
+          setOpen(false);
+        } else toast.error(`No product found for “${code}”`);
+      }
       else toast.error(e instanceof Error ? e.message : "Lookup failed");
     } finally {
       setLooking(false);
@@ -122,6 +139,43 @@ export const VariantPicker = React.forwardRef<HTMLInputElement, VariantPickerPro
     const tier = priceTier === "wholesale" && i.wholesalePrice ? i.wholesalePrice : i.price;
     return promoPrice(tier, i.promotion);
   };
+
+  const renderItem = (i: SellableItem) => (
+        <CommandItem key={i.variantId} value={i.variantId} onSelect={() => pick(i)} className="gap-3 py-2">
+          <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted">
+            {i.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={assetUrl(i.imageUrl)!} alt="" className="size-full object-cover" />
+            ) : (
+              <Package className="size-4 text-muted-foreground" />
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-foreground">
+              {i.productName}
+              {i.variantName && <span className="font-normal text-muted-foreground"> · {i.variantName}</span>}
+            </p>
+            <p className="truncate font-mono text-[11.5px] text-muted-foreground">
+              {[i.sku, i.barcode].filter(Boolean).join(" · ") || "No SKU"}
+            </p>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="num text-sm font-semibold text-foreground">{money.format(price(i))}</p>
+            {i.trackInventory ? (
+              <p
+                className={cn(
+                  "num text-[11.5px]",
+                  i.stock <= 0 ? "text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {formatQty(i.stock)} {i.unitShortName ?? "in stock"}
+              </p>
+            ) : (
+              <p className="text-[11.5px] text-muted-foreground">{i.type === "service" ? "Service" : "Not tracked"}</p>
+            )}
+          </div>
+        </CommandItem>
+  );
 
   return (
     <Command shouldFilter={false} loop className={cn("h-auto overflow-visible bg-transparent", className)}>
@@ -166,45 +220,18 @@ export const VariantPicker = React.forwardRef<HTMLInputElement, VariantPickerPro
           className="w-(--radix-popover-trigger-width) min-w-[min(520px,92vw)] p-0"
         >
           <CommandList className="max-h-[380px]">
-            {!results.isFetching && dq && <CommandEmpty>No products match “{dq}”. Press Enter to look up the code.</CommandEmpty>}
+            {!results.isFetching && !closest.isFetching && dq && closestItems.length === 0 && (
+              <CommandEmpty>No products match “{dq}”. Press Enter to look up the code.</CommandEmpty>
+            )}
+            {closest.isFetching && items.length === 0 && (
+              <p className="px-3 py-2 text-xs text-muted-foreground">Looking for the closest matches…</p>
+            )}
+            {closestItems.length > 0 && items.length === 0 && (
+              <CommandGroup heading={`Closest matches · ${closestItems.length}`}>{closestItems.map(renderItem)}</CommandGroup>
+            )}
             {items.length > 0 && (
               <CommandGroup heading={`${items.length} result${items.length === 1 ? "" : "s"}`}>
-                {items.map((i) => (
-                  <CommandItem key={i.variantId} value={i.variantId} onSelect={() => pick(i)} className="gap-3 py-2">
-                    <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted">
-                      {i.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={assetUrl(i.imageUrl)!} alt="" className="size-full object-cover" />
-                      ) : (
-                        <Package className="size-4 text-muted-foreground" />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-foreground">
-                        {i.productName}
-                        {i.variantName && <span className="font-normal text-muted-foreground"> · {i.variantName}</span>}
-                      </p>
-                      <p className="truncate font-mono text-[11.5px] text-muted-foreground">
-                        {[i.sku, i.barcode].filter(Boolean).join(" · ") || "No SKU"}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="num text-sm font-semibold text-foreground">{money.format(price(i))}</p>
-                      {i.trackInventory ? (
-                        <p
-                          className={cn(
-                            "num text-[11.5px]",
-                            i.stock <= 0 ? "text-destructive" : "text-muted-foreground",
-                          )}
-                        >
-                          {formatQty(i.stock)} {i.unitShortName ?? "in stock"}
-                        </p>
-                      ) : (
-                        <p className="text-[11.5px] text-muted-foreground">{i.type === "service" ? "Service" : "Not tracked"}</p>
-                      )}
-                    </div>
-                  </CommandItem>
-                ))}
+                {items.map(renderItem)}
               </CommandGroup>
             )}
           </CommandList>

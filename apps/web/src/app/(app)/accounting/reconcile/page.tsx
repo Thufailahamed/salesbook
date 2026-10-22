@@ -1,8 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { CheckCheck, FileUp, Landmark, Undo2, Wand2 } from "lucide-react";
-import type { BankMatchResult, BankStatementView, Reconciliation, ReconciliationInput, ReconciliationView } from "@shopbooks/shared";
+import Link from "next/link";
+import { CheckCheck, FileUp, Landmark, Sparkles, Undo2, Wand2 } from "lucide-react";
+import type {
+  AiStatus,
+  BankMatchResult,
+  BankStatementLine,
+  BankStatementView,
+  BankSuggestions,
+  Reconciliation,
+  ReconciliationInput,
+  ReconciliationView,
+} from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { EmptyState } from "@/components/empty-state";
@@ -191,21 +201,29 @@ export default function ReconcilePage() {
             </SectionCard>
 
             <div className="grid content-start gap-6">
-              <SectionCard title="Balance check" icon={CheckCheck} className={isFetching ? "opacity-70" : undefined}>
-                <dl className="grid gap-3 text-[14px]">
-                  <Row label="Statement balance" value={statementBalance} />
-                  <Row label="Cleared before" value={data.clearedBalance} />
-                  <Row label="Ticked now" value={selectedTotal} signed />
-                  <div className="border-t pt-3">
-                    <Row label="Difference" value={difference} strong />
-                  </div>
-                </dl>
-                <p className="mt-3 text-[13px] text-muted-foreground">
+              <section
+                className={`metal overflow-hidden rounded-3xl p-6 text-white transition-opacity ${isFetching ? "opacity-70" : ""}`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex size-9 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/10">
+                    <CheckCheck className="size-4 text-highlight" />
+                  </span>
+                  <h2 className="font-display text-[17px] font-semibold">Balance check</h2>
+                </div>
+                <p className="eyebrow mt-6 text-white/50">Difference</p>
+                <p className={`figure mt-1.5 text-4xl ${difference === 0 ? "text-highlight" : "text-white"}`}>{money.format(difference)}</p>
+                <p className="mt-2 text-[13px] text-white/60">
                   {difference === 0 ? "The cleared balance matches the statement." : "Tick entries until the difference is zero."}
                 </p>
+                <dl className="mt-6 grid gap-2.5 border-t border-white/10 pt-5 text-[13px]">
+                  <BalanceRow label="Statement balance" value={statementBalance} />
+                  <BalanceRow label="Cleared before" value={data.clearedBalance} />
+                  <BalanceRow label="Ticked now" value={selectedTotal} signed />
+                </dl>
                 {manage && (
                   <Button
-                    className="mt-4 w-full"
+                    variant="highlight"
+                    className="mt-6 w-full"
                     disabled={!canFinish}
                     loading={finish.isPending}
                     onClick={() =>
@@ -220,7 +238,7 @@ export default function ReconcilePage() {
                     Finish reconciliation
                   </Button>
                 )}
-              </SectionCard>
+              </section>
 
               <SectionCard title="Previous reconciliations" flush>
                 {data.history.length === 0 ? (
@@ -298,6 +316,15 @@ function BankStatementCard({
   const fileRef = React.useRef<HTMLInputElement>(null);
   const rows = statement?.rows ?? [];
   const unmatched = rows.filter((r) => !r.matched).length;
+  const aiStatus = useApiQuery<AiStatus>("/ai/status", undefined, { staleTime: Infinity });
+  const { paymentMethods } = useSession();
+  // The statement belongs to this bank account, so the expense should be paid through the method linked to it.
+  const bankMethodId = paymentMethods.find((m) => m.accountId === accountId && m.isActive)?.id ?? null;
+  const [suggestions, setSuggestions] = React.useState<Map<string, BankSuggestions["suggestions"][number]>>(new Map());
+  const suggest = useApiMutation((id: string) => api.post<BankSuggestions>("/ai/bank-suggestions", { accountId: id }), {
+    onSuccess: (res) => setSuggestions(new Map(res.suggestions.map((s) => [s.lineId, s]))),
+  });
+  React.useEffect(() => setSuggestions(new Map()), [accountId]);
   return (
     <SectionCard
       title="Bank statement"
@@ -311,6 +338,11 @@ function BankStatementCard({
           <Button variant="outline" size="sm" onClick={onMatch} loading={matching} disabled={unmatched === 0}>
             <Wand2 /> Auto-match
           </Button>
+          {aiStatus.data?.bankSuggest && (
+            <Button variant="outline" size="sm" onClick={() => suggest.mutate(accountId)} loading={suggest.isPending} disabled={unmatched === 0}>
+              <Sparkles /> Suggest categories
+            </Button>
+          )}
           {rows.length > 0 && (
             <Button variant="ghost" size="sm" onClick={onClear}>Clear unmatched</Button>
           )}
@@ -373,7 +405,17 @@ function BankStatementCard({
             {rows.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="text-[13px] text-muted-foreground">{r.date}</TableCell>
-                <TableCell className="max-w-0 truncate">{r.description}</TableCell>
+                <TableCell className="max-w-0">
+                  <p className="truncate">{r.description}</p>
+                  {!r.matched && suggestions.get(r.id) && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Suggested: {suggestions.get(r.id)!.categoryName} ·{" "}
+                      <Link className="underline underline-offset-2 hover:text-foreground" href={recordHref(r, suggestions.get(r.id)!.categoryId, bankMethodId)}>
+                        Record expense
+                      </Link>
+                    </p>
+                  )}
+                </TableCell>
                 <TableCell numeric><Money value={r.amount} tone="signed" /></TableCell>
                 <TableCell>
                   {r.matched ? <Badge variant="success">Matched</Badge> : <Badge variant="warning">Not in the books</Badge>}
@@ -396,4 +438,29 @@ function Row({ label, value, signed, strong }: { label: string; value: number; s
       </dd>
     </div>
   );
+}
+
+/** Label/amount line inside the dark balance-check card. */
+function BalanceRow({ label, value, signed }: { label: string; value: number; signed?: boolean }) {
+  const money = useMoney();
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <dt className="text-white/60">{label}</dt>
+      <dd className="num text-white">{money.format(value, signed ? { signed: true } : undefined)}</dd>
+    </div>
+  );
+}
+
+/** Opens the expense form pre-filled from a money-out statement line, with the suggested category. */
+function recordHref(line: BankStatementLine, categoryId: string, methodId: string | null) {
+  const query = new URLSearchParams({
+    new: "1",
+    accountId: categoryId,
+    ...(methodId ? { methodId } : {}),
+    amount: String(Math.abs(line.amount)),
+    date: line.date,
+    payee: line.description.slice(0, 200),
+    note: `From bank statement: ${line.description}`.slice(0, 1000),
+  });
+  return `/expenses?${query}`;
 }

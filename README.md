@@ -90,9 +90,13 @@ node scripts/e2e.mjs http://localhost:8787
 npx wrangler login
 npx wrangler d1 create shopbooks-db          # copy the database_id into apps/api/wrangler.jsonc
 npx wrangler r2 bucket create shopbooks-files
-npm run db:migrate:remote
-npm run deploy                               # builds the web app and deploys one Worker
+npm run deploy                               # see below
 ```
+
+`npm run deploy` (`scripts/deploy.mjs`) does the whole release in one go: checks the wrangler login and
+`database_id`, typechecks, builds the web app for a same-origin API (ignoring `apps/web/.env.local`),
+applies pending D1 migrations remotely, deploys the Worker and smoke-tests the live URL. Flags:
+`--skip-checks` (no typecheck), `--skip-migrations`, `--dry-run` (stop before touching Cloudflare), e.g. `npm run deploy -- --skip-checks`.
 
 The deployed Worker serves the app at its root and the API under `/api` — same origin, so no CORS or
 API URL configuration is needed in production. D1 runs every business operation as a single atomic

@@ -419,3 +419,20 @@ export const CURRENCIES = [
 ] as const;
 
 export const WALK_IN_CUSTOMER_NAME = "Walk-in customer";
+
+/** Free signup on a paid plan starts a trial of this many days; the shop then pays from Settings → Subscription. */
+export const TRIAL_DAYS = 14;
+
+/** AI features a business can switch off in Settings. The server must also have each feature's model configured. */
+export const AI_FEATURES = [
+  "receiptScan",
+  "ask",
+  "bankSuggest",
+  "productSearch",
+  "productDraft",
+  "reminderDraft",
+  "help",
+  "cashForecast",
+  "salesReview",
+] as const;
+export type AiFeature = (typeof AI_FEATURES)[number];

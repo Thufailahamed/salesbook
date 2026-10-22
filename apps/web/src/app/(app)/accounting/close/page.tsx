@@ -1,17 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { CalendarCheck, Lock, Unlock } from "lucide-react";
-import type { Business, BooksLockInput, DepreciationInput } from "@shopbooks/shared";
+import { CalendarCheck, ClipboardCheck, Lock, Unlock, type LucideIcon } from "lucide-react";
+import type { Business, BooksLockInput, CloseReview, CloseReviewInput, DepreciationInput } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
-import { SectionCard } from "@/components/section-card";
 import { Field, FieldGrid } from "@/components/form-field";
 import { MoneyInput } from "@/components/money-input";
 import { useBusinessToday } from "@/components/filters";
 import { useConfirm } from "@/components/confirm-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { SectionCard } from "@/components/section-card";
+import { useMoney } from "@/hooks/use-money";
 import { useApiMutation } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
@@ -57,24 +58,31 @@ export default function PeriodClosePage() {
         title="Period close"
         description="Lock past periods so their entries can't change, and post depreciation for fixed assets."
       />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <SectionCard
-          title="Books closed through"
-          icon={closedThrough ? Lock : Unlock}
-          description="Entries dated on or before this day are locked, including sales, purchases, payments and manual journals."
-        >
-          <div className="grid gap-5">
-            <div className="flex items-center gap-3">
-              {closedThrough ? (
-                <>
-                  <Badge variant="warning">Closed</Badge>
-                  <span className="figure text-lg font-semibold">{closedThrough}</span>
-                </>
-              ) : (
-                <Badge variant="neutral">Open · nothing is locked</Badge>
-              )}
+
+      {/* Status hero: is the ledger locked, and through when. */}
+      <section className="metal relative mb-6 overflow-hidden rounded-3xl p-6 text-white sm:p-8">
+        <div className="flex flex-wrap items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <span className="flex size-12 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/10">
+              {closedThrough ? <Lock className="size-5 text-highlight" /> : <Unlock className="size-5 text-highlight" />}
+            </span>
+            <div>
+              <p className="eyebrow text-white/50">{closedThrough ? "Books closed" : "Books open"}</p>
+              <p className="figure mt-1.5 text-2xl text-gold sm:text-3xl">{closedThrough ?? "Nothing is locked"}</p>
             </div>
-            {manage && (
+          </div>
+          <p className="max-w-sm text-[13px] leading-relaxed text-white/60">
+            {closedThrough
+              ? "Entries dated on or before this day are locked. Sales, purchases, payments and manual journals can't change."
+              : "Every date is open. Close the books once a period is final so its numbers stay fixed."}
+          </p>
+        </div>
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ClosePanel step="01" icon={Lock} title="Close the books" description="Lock every entry on or before a date.">
+          <div className="grid gap-5">
+            {manage ? (
               <form
                 className="grid gap-4"
                 onSubmit={(e) => {
@@ -105,14 +113,17 @@ export default function PeriodClosePage() {
                   )}
                 </div>
               </form>
+            ) : (
+              <p className="text-sm text-muted-foreground">You need accounting permission to change the lock.</p>
             )}
           </div>
-        </SectionCard>
+        </ClosePanel>
 
-        <SectionCard
-          title="Record depreciation"
+        <ClosePanel
+          step="02"
           icon={CalendarCheck}
-          description="Charges depreciation for fixed assets: debits Depreciation Expense and credits Accumulated Depreciation (both accounts are created if missing)."
+          title="Record depreciation"
+          description="Debits Depreciation Expense and credits Accumulated Depreciation. Both accounts are created if missing."
         >
           {manage ? (
             <form
@@ -142,8 +153,100 @@ export default function PeriodClosePage() {
           ) : (
             <p className="text-sm text-muted-foreground">You need accounting permission to post depreciation.</p>
           )}
-        </SectionCard>
+        </ClosePanel>
+      </div>
+
+      <div className="mt-6">
+        <CloseReviewCard />
       </div>
     </>
+  );
+}
+
+const SEVERITY_BADGE = { high: "danger", medium: "warning", info: "neutral" } as const;
+const SEVERITY_LABEL = { high: "Check first", medium: "Worth a look", info: "Note" } as const;
+
+/** Read-only checks on the period before locking it. Nothing is changed by running it. */
+function CloseReviewCard() {
+  const money = useMoney();
+  const review = useApiMutation((body: CloseReviewInput) => api.post<CloseReview>("/accounting/close-review", body), {
+    errorToast: true,
+  });
+  const result = review.data;
+  return (
+    <SectionCard
+      title="Review before closing"
+      icon={ClipboardCheck}
+      description="Looks for duplicate expenses, bank lines not in the books, unreconciled bank entries and old customer balances. Nothing is changed."
+      action={
+        <Button variant="outline" size="sm" loading={review.isPending} onClick={() => review.mutate({})}>
+          <ClipboardCheck /> Run review
+        </Button>
+      }
+    >
+      {!result && !review.isPending && (
+        <p className="text-sm text-muted-foreground">Run the review on the period since the last close, up to yesterday.</p>
+      )}
+      {result && (
+        <>
+          <p className="text-sm text-muted-foreground">
+            Period {result.from} to {result.to}
+          </p>
+          {result.summary && (
+            <div className="mt-3 rounded-xl bg-muted/50 p-4 text-[14px] leading-relaxed whitespace-pre-line">{result.summary}</div>
+          )}
+          {result.findings.length === 0 ? (
+            <p className="mt-4 text-sm">Nothing to flag in this period.</p>
+          ) : (
+            <ul className="mt-4 grid gap-3">
+              {result.findings.map((f) => (
+                <li key={f.id} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border p-4">
+                  <div className="min-w-0">
+                    <p className="font-medium">{f.title}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{f.detail}</p>
+                    {f.count > 0 && <p className="mt-1 text-xs text-muted-foreground">{f.count} item{f.count === 1 ? "" : "s"}</p>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    {f.amount !== undefined && <span className="text-sm tabular-nums">{money.format(money.toMinor(f.amount))}</span>}
+                    <Badge variant={SEVERITY_BADGE[f.severity]}>{SEVERITY_LABEL[f.severity]}</Badge>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
+/** Numbered action panel used for each step on this page. */
+function ClosePanel({
+  step,
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  step: string;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-3xl bg-card p-6 shadow-card dark:shadow-[inset_0_0_0_1px_var(--border)]">
+      <div className="flex items-start gap-4">
+        <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-muted text-primary">
+          <Icon className="size-[19px]" strokeWidth={1.7} />
+        </span>
+        <div className="min-w-0">
+          <p className="font-mono text-[11px] text-muted-foreground">Step {step}</p>
+          <h2 className="font-display text-[17px] font-semibold tracking-[-0.01em]">{title}</h2>
+          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <div className="mt-6 border-t border-border/60 pt-6">{children}</div>
+    </section>
   );
 }

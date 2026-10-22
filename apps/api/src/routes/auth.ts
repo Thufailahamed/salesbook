@@ -18,7 +18,7 @@ import { hashPassword, sha256, verifyPassword } from "../lib/crypto";
 import { ApiError, badRequest, conflict, unauthorized } from "../lib/errors";
 import { vJson } from "../lib/validate";
 import { buildMe } from "../services/me";
-import { businessSubscription, publicPlans } from "../services/billing";
+import { businessSubscription, publicPlans, trialSubscription } from "../services/billing";
 import { createBusiness } from "../services/setup";
 
 const app = new Hono<AppEnv>();
@@ -59,7 +59,8 @@ app.post("/signup", vJson(signupSchema), async (c) => {
   } catch {
     throw badRequest("Unknown timezone");
   }
-  const { userId } = await createBusiness(db, { ...input, email }, await hashPassword(input.password));
+  const subscription = await trialSubscription(db, input.planId);
+  const { userId } = await createBusiness(db, { ...input, email }, await hashPassword(input.password), subscription);
   return c.json(await authResponse(c, userId), 201);
 });
 

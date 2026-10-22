@@ -2,8 +2,7 @@
 
 import * as React from "react";
 import type { Category, ProductSalesRow } from "@shopbooks/shared";
-import { ReportPage } from "@/components/report-shell";
-import { SectionCard } from "@/components/section-card";
+import { ReportPage, ReportSection } from "@/components/report-shell";
 import { EmptyState } from "@/components/empty-state";
 import { Money } from "@/components/money";
 import { FilterSelect } from "@/components/filters";
@@ -39,7 +38,7 @@ export default function ProductsReportPage() {
         const total = rows.reduce((a, p) => ({ q: a.q + p.quantity, s: a.s + p.netSales, c: a.c + p.cost, p: a.p + p.profit }), { q: 0, s: 0, c: 0, p: 0 });
         return (
           <div className="grid gap-6">
-            <SectionCard title="Products" description="Ranked by net sales" flush>
+            <ReportSection title="Products" description="Ranked by net sales" flush>
               {rows.length === 0 ? (
                 <EmptyState compact title="No product sales in this period" />
               ) : (
@@ -87,7 +86,7 @@ export default function ProductsReportPage() {
                   </TableFooter>
                 </Table>
               )}
-            </SectionCard>
+            </ReportSection>
           </div>
         );
       }}

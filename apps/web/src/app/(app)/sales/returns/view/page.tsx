@@ -9,6 +9,7 @@ import { TENDER_LABELS } from "@shopbooks/shared";
 import { PageHeader } from "@/components/page-header";
 import { DetailSkeleton, ErrorState } from "@/components/loading";
 import { SectionCard } from "@/components/section-card";
+import { DocHero } from "@/components/doc-detail";
 import { KeyValue } from "@/components/key-value";
 import { Money } from "@/components/money";
 import { Badge } from "@/components/ui/badge";
@@ -60,6 +61,12 @@ function ReturnView() {
           </>
         }
       />
+      <DocHero
+        eyebrow="Credit issued"
+        value={money.format(r.total)}
+        stats={settlement.slice(0, 3).map((x) => ({ label: x.label, value: money.format(x.value) }))}
+      />
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="grid min-w-0 content-start gap-6 lg:col-span-2">
           <SectionCard title="Returned items" flush>

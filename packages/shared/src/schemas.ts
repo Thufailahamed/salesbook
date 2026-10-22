@@ -3,6 +3,7 @@ import { PROMOTION_KINDS } from "./promotions";
 import {
   ACCOUNT_TYPES,
   ADJUSTMENT_REASONS,
+  AI_FEATURES,
   CASH_MOVEMENT_TYPES,
   CUSTOMER_TYPES,
   PAYMENT_METHOD_TYPES,
@@ -66,6 +67,8 @@ export const signupSchema = z.object({
   taxInclusive: z.boolean().default(true),
   defaultTaxRate: z.number().min(0).max(100).default(0),
   taxName: zText(40),
+  /** Plan to start on (free signup only): paid plans begin a TRIAL_DAYS trial. Defaults to the first active plan. */
+  planId: z.string().max(40).nullish(),
 });
 export type SignupInput = z.infer<typeof signupSchema>;
 
@@ -640,6 +643,28 @@ export const expenseSchema = z.object({
 });
 export type ExpenseInput = z.infer<typeof expenseSchema>;
 
+export const bankSuggestSchema = z.object({ accountId: zId });
+
+export const reorderAdviceSchema = z.object({ locationId: z.string().optional() });
+
+export const productDraftSchema = z.object({ name: zName(200) });
+
+export const reminderDraftSchema = z.object({ partyType: z.enum(["customer", "supplier"]), partyId: zId });
+export type ReminderDraftInput = z.infer<typeof reminderDraftSchema>;
+
+export const aiHelpSchema = z.object({
+  question: z.string().trim().min(3, "Ask a question").max(300),
+});
+export type AiHelpInput = z.infer<typeof aiHelpSchema>;
+
+export const closeReviewSchema = z.object({ from: zDate.optional(), to: zDate.optional() });
+export type CloseReviewInput = z.infer<typeof closeReviewSchema>;
+
+export const aiAskSchema = z.object({
+  question: z.string().trim().min(3, "Ask a question").max(300),
+});
+export type AiAskInput = z.infer<typeof aiAskSchema>;
+
 export const expenseListQuerySchema = listQuerySchema.extend({
   accountId: z.string().optional(),
   locationId: z.string().optional(),
@@ -890,3 +915,8 @@ export const platformShopListQuerySchema = listQuerySchema.extend({
 export const platformOrderListQuerySchema = listQuerySchema.extend({
   status: z.enum(["pending", "paid", "failed", "expired"]).optional(),
 });
+
+export const aiSettingsSchema = z.object({
+  features: z.object(Object.fromEntries(AI_FEATURES.map((k) => [k, z.boolean().optional()]))),
+});
+export type AiSettingsInput = z.infer<typeof aiSettingsSchema>;

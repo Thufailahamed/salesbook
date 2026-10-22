@@ -6,7 +6,7 @@ import { AuthGuard } from "@/components/layout/auth-guard";
 export default function PosLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthGuard>
-      <div className="flex h-dvh flex-col overflow-hidden bg-background">{children}</div>
+      <div className="flex h-dvh flex-col overflow-hidden bg-frame">{children}</div>
     </AuthGuard>
   );
 }
